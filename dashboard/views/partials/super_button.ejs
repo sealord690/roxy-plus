@@ -1,0 +1,50 @@
+<div class="super-button-wrapper">
+    <div class="super-menu" id="superMenu">
+        <div class="menu-header">Roxy+ Hub</div>
+
+        <a href="/" class="menu-item <%= page === 'home' ? 'active' : '' %>">
+            <span class="icon">🏠</span>
+            <span class="label">Dashboard</span>
+        </a>
+
+        <a href="/afk" class="menu-item <%= page === 'afk' ? 'active' : '' %>">
+            <span class="icon">💤</span>
+            <span class="label">AFK System</span>
+        </a>
+
+        <div class="menu-item coming-soon">
+            <span class="icon">⚡</span>
+            <span class="label">Commands</span>
+            <span class="badge">Soon</span>
+        </div>
+
+        <div class="menu-item coming-soon">
+            <span class="icon">🎵</span>
+            <span class="label">Music</span>
+            <span class="badge">Soon</span>
+        </div>
+
+        <a href="/quest" class="menu-item <%= page === 'quest' ? 'active' : '' %>">
+            <span class="icon">⚔️</span>
+            <span class="label">Quests</span>
+        </a>
+    </div>
+
+    <button class="super-btn" id="superBtn" onclick="toggleSuperMenu()">
+        <span class="plus-icon">⚡</span>
+    </button>
+</div>
+
+<div class="super-overlay" id="superOverlay" onclick="toggleSuperMenu()"></div>
+
+<script>
+    function toggleSuperMenu() {
+        const menu = document.getElementById('superMenu');
+        const btn = document.getElementById('superBtn');
+        const overlay = document.getElementById('superOverlay');
+
+        menu.classList.toggle('open');
+        btn.classList.toggle('active');
+        overlay.classList.toggle('visible');
+    }
+</script>
