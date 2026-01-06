@@ -224,6 +224,69 @@ module.exports = (client) => {
         res.json({ success: true });
     });
 
+    // Auto Reaction API
+    app.get('/api/reaction', (req, res) => {
+        const reactionManager = require('../commands/reactionManager');
+        const data = reactionManager.loadData();
+
+        // Enrich Servers
+        const enrichedServers = (data.enabledServers || []).map(id => {
+            const g = client.guilds.cache.get(id);
+            return {
+                id,
+                name: g ? g.name : `Unknown Server`,
+                icon: g ? g.iconURL({ dynamic: true }) : 'https://cdn.discordapp.com/embed/avatars/0.png'
+            };
+        });
+
+        // Enrich Channels
+        const enrichedChannels = (data.enabledChannels || []).map(id => {
+            const c = client.channels.cache.get(id);
+            return {
+                id,
+                name: c ? c.name : `Unknown Channel`,
+                guildName: c?.guild ? c.guild.name : 'Unknown Server',
+                guildIcon: c?.guild ? c.guild.iconURL({ dynamic: true }) : 'https://cdn.discordapp.com/embed/avatars/0.png'
+            };
+        });
+
+        res.json({ ...data, enrichedServers, enrichedChannels });
+    });
+
+    app.post('/api/reaction', (req, res) => {
+        const reactionManager = require('../commands/reactionManager');
+        reactionManager.saveData(req.body);
+        res.json({ success: true });
+    });
+
+    // Validation APIs
+    app.post('/api/validate/guild', async (req, res) => {
+        const { id } = req.body;
+        try {
+            const guild = client.guilds.cache.get(id);
+            if (!guild) return res.status(404).json({ error: 'Server not found (Bot must be in it)' });
+            res.json({
+                id: guild.id,
+                name: guild.name,
+                icon: guild.iconURL({ dynamic: true }) || 'https://cdn.discordapp.com/embed/avatars/0.png'
+            });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    app.post('/api/validate/channel', async (req, res) => {
+        const { id } = req.body;
+        try {
+            const channel = client.channels.cache.get(id);
+            if (!channel) return res.status(404).json({ error: 'Channel not found' });
+            res.json({
+                id: channel.id,
+                name: channel.name,
+                guildName: channel.guild?.name || 'Direct Message',
+                guildIcon: channel.guild?.iconURL({ dynamic: true }) || 'https://cdn.discordapp.com/embed/avatars/0.png' // Added guildIcon
+            });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
     app.get('/commands/reaction', (req, res) => {
         res.render('cmd_reaction', { user: client.user, page: 'commands' });
     });

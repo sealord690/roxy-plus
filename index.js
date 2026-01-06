@@ -84,6 +84,10 @@ client.on('ready', () => {
     const rpcManager = require('./commands/rpcManager');
     rpcManager.initialize(client);
 
+    // Initialize Auto Reaction
+    const reactionManager = require('./commands/reactionManager');
+    reactionManager.initialize(client);
+
     // Start Dashboard
     dashboard(client);
 });
