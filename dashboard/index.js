@@ -18,6 +18,105 @@ module.exports = (client) => {
     app.use(express.static(path.join(__dirname, 'public')));
     app.use(express.urlencoded({ extended: true }));
     app.use(express.json()); // Add JSON body parser for AJAX
+    const cookieParser = require('cookie-parser');
+    app.use(cookieParser());
+    const { fetch } = require('undici'); // Use undici for requests
+
+    // --- LOGIN SYSTEM START ---
+    const failedLoginAttempts = new Map();
+
+    async function verifyKey(key) {
+        try {
+            const res = await fetch('https://roxy-plus-key.vercel.app/api/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key })
+            });
+            const data = await res.json();
+            return data.success;
+        } catch (e) { console.error('Key verify error:', e); return false; }
+    }
+
+    // Login Page
+    app.get('/login', (req, res) => {
+        if (req.cookies.auth_token === 'valid_session') return res.redirect('/');
+        res.render('login');
+    });
+
+    // Login API
+    app.post('/api/login', async (req, res) => {
+        const { username, password, key } = req.body;
+        const ip = req.ip;
+
+        console.log(`[Login Debug] Attempt from ${ip}`);
+        console.log(`[Login Debug] Input -> User: '${username}', Key: '${key}'`);
+
+        // Check Rate Limit
+        const record = failedLoginAttempts.get(ip);
+        if (record && record.blockedUntil > Date.now()) {
+            const remaining = Math.ceil((record.blockedUntil - Date.now()) / 1000 / 60);
+            return res.json({ success: false, error: `Too many attempts. Blocked for ${remaining} mins.` });
+        }
+
+        // Credentials Check
+        const envUser = process.env.APP_USER || process.env.USERNAME; // Fallback or strict? Better strict APP_USER to avoid confusion.
+        // Actually, let's use APP_USER.
+        const envPass = process.env.APP_PASS || process.env.PASS;
+
+        console.log(`[Login Debug] Config -> AppUser: '${envUser}', AppPass Configured: ${!!envPass}`);
+
+        if (!envUser || !envPass) {
+            console.log('[Login Debug] Missing .env config (APP_USER/APP_PASS)');
+            return res.json({ success: false, error: 'Login setup missing in .env (APP_USER/APP_PASS).' });
+        }
+
+        let failed = false;
+        let reason = '';
+
+        if (username !== envUser || password !== envPass) {
+            failed = true;
+            reason = 'Credentials mismatch';
+            console.log(`[Login Debug] Credentials mismatch. Expected User: '${envUser}'`);
+        } else {
+            // Verify Key
+            const isKeyValid = await verifyKey(key);
+            console.log(`[Login Debug] Key Verification Result: ${isKeyValid}`);
+            if (!isKeyValid) {
+                failed = true;
+                reason = 'Key Verification Failed (API returned false)';
+            }
+        }
+
+        if (failed) {
+            const r = record || { count: 0, blockedUntil: 0 };
+            r.count++;
+            console.log(`[Login Debug] Failed attempt #${r.count}. Reason: ${reason}`);
+            if (r.count >= 3) {
+                r.blockedUntil = Date.now() + 5 * 60 * 1000; // 5 mins
+                r.count = 0;
+            }
+            failedLoginAttempts.set(ip, r);
+            return res.json({ success: false, error: 'Invalid Credentials or Key.' });
+        }
+
+        // Success
+        console.log('[Login Debug] Success!');
+        failedLoginAttempts.delete(ip);
+        res.cookie('auth_token', 'valid_session', { maxAge: 24 * 60 * 60 * 1000, httpOnly: true });
+        res.json({ success: true });
+    });
+
+    // Auth Middleware (Protects everything below)
+    app.use((req, res, next) => {
+        if (req.path === '/login' || req.path === '/api/login' || req.path.startsWith('/css') || req.path.startsWith('/js') || req.path.startsWith('/images')) {
+            return next();
+        }
+        if (req.cookies.auth_token === 'valid_session') {
+            return next();
+        }
+        res.redirect('/login');
+    });
+    // --- LOGIN SYSTEM END ---
 
     app.get('/', (req, res) => {
         if (!client.user) {
