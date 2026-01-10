@@ -177,20 +177,16 @@ module.exports = (client) => {
         try {
             const { status, custom_status, emoji } = req.body;
 
-            let activities = [];
-            if (custom_status) {
-                activities.push({
-                    type: 'CUSTOM',
-                    name: 'Custom Status',
-                    state: custom_status,
-                    emoji: emoji || null
-                });
-            }
-
-            await client.user.setPresence({
+            const statusManager = require('../commands/statusManager');
+            statusManager.saveData({
                 status: status,
-                activities: activities
+                custom_status: custom_status,
+                emoji: emoji
             });
+
+            // Trigger update via RPC Manager (which merges RPC + Status)
+            const rpcManager = require('../commands/rpcManager');
+            await rpcManager.setPresence(client, rpcManager.loadData());
 
             res.redirect('/');
         } catch (error) {
