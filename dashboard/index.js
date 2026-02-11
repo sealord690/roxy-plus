@@ -37,9 +37,36 @@ module.exports = (client) => {
         } catch (e) { console.error('Key verify error:', e); return false; }
     }
 
+    const sessionKeyPath = path.join(__dirname, '..', 'data', 'dashboard_key.json');
+
+    // Auto-Logout System (Hourly Check)
+    setInterval(async () => {
+        if (fs.existsSync(sessionKeyPath)) {
+            try {
+                const sessionData = JSON.parse(fs.readFileSync(sessionKeyPath, 'utf8'));
+                if (sessionData && sessionData.key) {
+                    const isValid = await verifyKey(sessionData.key);
+                    if (!isValid) {
+                        console.log('[Auth System] Key expired or invalid. Logging out user.');
+                        try { fs.unlinkSync(sessionKeyPath); } catch (e) { }
+                    }
+                }
+            } catch (error) {
+                console.error('[Auth System] Error checking key:', error);
+            }
+        }
+    }, 60 * 60 * 1000); // Check every 1 hour
+
     // Login Page
     app.get('/login', (req, res) => {
-        if (req.cookies.auth_token === 'valid_session') return res.redirect('/');
+        if (req.cookies.auth_token === 'valid_session') {
+            if (fs.existsSync(sessionKeyPath)) {
+                return res.redirect('/');
+            } else {
+                // Invalid state: Cookie exists but key file is gone. Clear cookie.
+                res.clearCookie('auth_token');
+            }
+        }
         res.render('login');
     });
 
@@ -102,7 +129,16 @@ module.exports = (client) => {
         // Success
         console.log('[Login Debug] Success!');
         failedLoginAttempts.delete(ip);
-        res.cookie('auth_token', 'valid_session', { maxAge: 24 * 60 * 60 * 1000, httpOnly: true });
+
+        // Save Key for Background Checks
+        try {
+            fs.writeFileSync(sessionKeyPath, JSON.stringify({ key }));
+        } catch (e) {
+            console.error('Failed to save session key:', e);
+        }
+
+        // Long-lived cookie (session valid as long as key file exists and matches)
+        res.cookie('auth_token', 'valid_session', { maxAge: 365 * 24 * 60 * 60 * 1000, httpOnly: true });
         res.json({ success: true });
     });
 
@@ -111,7 +147,8 @@ module.exports = (client) => {
         if (req.path === '/login' || req.path === '/api/login' || req.path.startsWith('/css') || req.path.startsWith('/js') || req.path.startsWith('/images')) {
             return next();
         }
-        if (req.cookies.auth_token === 'valid_session') {
+        // Check for cookie AND valid session file
+        if (req.cookies.auth_token === 'valid_session' && fs.existsSync(sessionKeyPath)) {
             return next();
         }
         res.redirect('/login');
@@ -119,6 +156,9 @@ module.exports = (client) => {
     // --- LOGIN SYSTEM END ---
 
     app.get('/logout', (req, res) => {
+        if (fs.existsSync(sessionKeyPath)) {
+            try { fs.unlinkSync(sessionKeyPath); } catch (e) { }
+        }
         res.clearCookie('auth_token');
         res.redirect('/login');
     });
