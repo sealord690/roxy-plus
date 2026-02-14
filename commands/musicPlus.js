@@ -23,8 +23,8 @@ module.exports = {
 
         if (sub === "volume") {
             const vol = Number(args[1]);
-            if (!vol || vol < 1 || vol > 200)
-                return message.reply("Provide volume between 1 - 1000.");
+            if (!vol || vol < 1 || vol > 9999)
+                return message.reply("Provide volume between 1 - 9999.");
 
             player.setVolume(vol);
             return message.channel.send(`🔊 Volume set to ${vol}%`);
