@@ -453,6 +453,20 @@ module.exports = (client) => {
             const c = client.channels.cache.get(id);
             return { id, name: c ? c.name : 'Unknown Channel', guildName: c?.guild?.name || 'Unknown', guildIcon: c?.guild?.iconURL({ dynamic: true }) || 'https://cdn.discordapp.com/embed/avatars/0.png' };
         });
+        const enrichedGroupsAlways = (data.enabledGroups || []).map(id => {
+            const c = client.channels.cache.get(id);
+            let name = c ? c.name : 'Unknown Channel/Group';
+            if (c && !name && c.recipients) name = c.recipients.map(u => u.username).join(', ');
+            return { id, name, mode: 'always' };
+        });
+        const enrichedGroupsMention = (data.enabledGroupsMention || []).map(id => {
+            const c = client.channels.cache.get(id);
+            let name = c ? c.name : 'Unknown Channel/Group';
+            if (c && !name && c.recipients) name = c.recipients.map(u => u.username).join(', ');
+            return { id, name, mode: 'mention' };
+        });
+        const enrichedGroups = [...enrichedGroupsAlways, ...enrichedGroupsMention];
+
         const enrichedFreeWill = (data.freeWillChannels || []).map(id => {
             const c = client.channels.cache.get(id);
             return { id, name: c ? c.name : 'Unknown Channel', guildName: c?.guild?.name || 'Unknown', guildIcon: c?.guild?.iconURL({ dynamic: true }) || 'https://cdn.discordapp.com/embed/avatars/0.png' };
@@ -463,7 +477,7 @@ module.exports = (client) => {
             return { id, username: u ? u.username : 'Unknown User', avatar: u ? u.displayAvatarURL({ dynamic: true }) : 'https://cdn.discordapp.com/embed/avatars/0.png' };
         });
 
-        res.json({ ...data, enrichedServers, enrichedChannels, enrichedFreeWill, enrichedUsers });
+        res.json({ ...data, enrichedServers, enrichedChannels, enrichedGroups, enrichedFreeWill, enrichedUsers });
     });
 
     app.post('/api/ai', (req, res) => {

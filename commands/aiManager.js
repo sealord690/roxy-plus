@@ -18,6 +18,8 @@ const DEFAULT_CONFIG = {
     enabledServers: [],
     enabledChannels: [],
     dmUsers: [],
+    enabledGroups: [], // Always reply
+    enabledGroupsMention: [], // Reply only on mention
     freeWillChannels: [],
     aiName: "Roxy",
     backstory: "You are Roxy, a helpful and witty AI assistant.",
@@ -167,69 +169,90 @@ function initialize(client) {
     console.log("[AI System] Initializing...");
 
     client.on('messageCreate', async (message) => {
-        if (message.author.bot) return;
-        // CRITICAL FIX: Prevent self-reply loop
-        if (message.author.id === client.user.id) return;
+        try {
+            if (message.author.bot) return;
+            // CRITICAL FIX: Prevent self-reply loop & specific crashes
+            if (!client.user || message.author.id === client.user.id) return;
 
-        const config = loadData();
-        const content = message.content;
-        const guildId = message.guild?.id;
-        const channelId = message.channel.id;
-        const authorId = message.author.id;
+            const config = loadData();
+            const content = message.content;
+            const guildId = message.guild?.id;
+            const channelId = message.channel.id;
+            const authorId = message.author.id;
 
-        // Banned Words Check
-        if (config.bannedWords && config.bannedWords.some(w => content.toLowerCase().includes(w.toLowerCase()))) {
-            return;
-        }
-
-        // Flags
-        let shouldReply = false;
-
-        // 1. DM Logic
-        if (!guildId) {
-            if (config.dmUsers && config.dmUsers.includes(authorId)) {
-                shouldReply = true;
+            // Banned Words Check
+            if (config.bannedWords && config.bannedWords.some(w => content.toLowerCase().includes(w.toLowerCase()))) {
+                return;
             }
-        } else {
-            // Server Logic
 
-            // Check Free Will
-            if (config.freeWillChannels && config.freeWillChannels.includes(channelId)) {
-                shouldReply = true;
-            }
-            // Check Mention/Reply triggers
-            else {
-                const isMentioned = message.mentions.users.has(client.user.id);
-                // Reply logic could be added here if needed
+            // Flags
+            let shouldReply = false;
 
-                if (isMentioned) {
-                    if (config.global) {
+            // 1. DM Logic (or Group DM)
+            if (!guildId) {
+                // Check if user is whitelisted for DMs
+                if (config.dmUsers && config.dmUsers.includes(authorId)) {
+                    shouldReply = true;
+                }
+                // Check if group/channel is whitelisted (ALWAYS REPLY)
+                if (config.enabledGroups && config.enabledGroups.includes(channelId)) {
+                    shouldReply = true;
+                }
+                // Check if group/channel is whitelisted (MENTION ONLY)
+                if (config.enabledGroupsMention && config.enabledGroupsMention.includes(channelId)) {
+                    if (message.mentions.users.has(client.user.id)) {
                         shouldReply = true;
-                    } else {
-                        const serverAllowed = config.enabledServers && config.enabledServers.includes(guildId);
-                        const channelAllowed = config.enabledChannels && config.enabledChannels.includes(channelId);
-                        if (serverAllowed || channelAllowed) {
+                    }
+                }
+            } else {
+                // Server Logic
+
+                // Check Free Will
+                if (config.freeWillChannels && config.freeWillChannels.includes(channelId)) {
+                    shouldReply = true;
+                }
+                // Check Mention/Reply triggers
+                else {
+                    const isMentioned = message.mentions.users.has(client.user.id);
+                    // Reply logic could be added here if needed
+
+                    if (isMentioned) {
+                        if (config.global) {
                             shouldReply = true;
+                        } else {
+                            const serverAllowed = config.enabledServers && config.enabledServers.includes(guildId);
+                            const channelAllowed = config.enabledChannels && config.enabledChannels.includes(channelId);
+                            if (serverAllowed || channelAllowed) {
+                                shouldReply = true;
+                            }
                         }
                     }
                 }
             }
-        }
 
-        if (content.includes('@everyone') || content.includes('@here')) {
-            // Ignore logic
-        }
-
-        if (shouldReply) {
-            message.channel.sendTyping().catch(() => { });
-            // Generate
-            // Prepend username for context
-            const effectiveContent = `(User: ${message.author.username}) ${content}`;
-            const reply = await generateReply(authorId, effectiveContent);
-
-            if (reply) {
-                message.reply(reply).catch(e => console.error("[AI] Failed to send:", e));
+            if (content.includes('@everyone') || content.includes('@here')) {
+                // Ignore logic
             }
+
+            if (shouldReply) {
+                message.channel.sendTyping().catch(() => { });
+                // Generate
+                // Prepend username for context
+                const effectiveContent = `(User: ${message.author.username}) ${content}`;
+                const reply = await generateReply(authorId, effectiveContent);
+
+                if (reply && reply.trim().length > 0) {
+                    try {
+                        await message.reply(reply);
+                    } catch (e) {
+                        // Fallback: If reply fails (e.g. Invalid Form Body), try normal send
+                        // console.warn("[AI] Reply failed, attempting plain send...", e.message);
+                        await message.channel.send(reply).catch(err => console.error("[AI] Failed to send:", err));
+                    }
+                }
+            }
+        } catch (error) {
+            console.error("Error in AI messageCreate:", error);
         }
     });
 }

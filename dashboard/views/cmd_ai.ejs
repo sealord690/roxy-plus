@@ -475,6 +475,28 @@
                     style="margin-top:20px; border-top:1px solid rgba(255,255,255,0.1); padding-top:10px;"></div>
             </div>
 
+            <!-- Group Chats -->
+            <div class="section-card">
+                <div class="section-title">Whitelisted Group Chats</div>
+                <p style="color:#888; font-size:0.85rem; margin-bottom:15px;">Enable for specific Group DMs.</p>
+
+                <input type="text" id="inputGroup" class="input-field" placeholder="Paste Group ID..."
+                    oninput="onWhitelistInput('group')">
+
+                <div style="margin: 10px 0; display:flex; align-items:center;">
+                    <input type="checkbox" id="chkGroupMention"
+                        style="transform: scale(1.2); margin-right: 8px; cursor:pointer;">
+                    <label for="chkGroupMention" style="color:#ccc; cursor:pointer; font-size:0.9rem;">Reply ONLY when
+                        Mentioned</label>
+                </div>
+
+                <div id="previewGroup" style="display:none;"></div>
+                <button id="btnAddGroup" class="btn-add" disabled onclick="confirmAdd('group')">Add Group</button>
+
+                <div id="groupList"
+                    style="margin-top:20px; border-top:1px solid rgba(255,255,255,0.1); padding-top:10px;"></div>
+            </div>
+
             <!-- Free Will Channels -->
             <div class="section-card">
                 <div class="section-title">Free Will Channels</div>
@@ -561,6 +583,7 @@
                 // Render Lists
                 renderList('serverList', currentData.enrichedServers, 'guild');
                 renderList('channelList', currentData.enrichedChannels, 'channel');
+                renderList('groupList', currentData.enrichedGroups, 'group');
                 renderList('userList', currentData.enrichedUsers, 'user');
                 renderList('freeList', currentData.enrichedFreeWill, 'free');
             }
@@ -581,6 +604,12 @@
                     if (type === 'channel' || type === 'free') {
                         name = '#' + name;
                         sub = `in ${item.guildName}`;
+                    }
+                    if (type === 'group') {
+                        sub = 'Group Chat';
+                        if (item.mode === 'mention') sub += ' <span style="background:#e67e22; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7em;">MENTION ONLY</span>';
+                        else sub += ' <span style="background:#2ecc71; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7em;">ALWAYS</span>';
+                        if (!icon) icon = 'https://cdn.discordapp.com/embed/avatars/0.png';
                     }
 
                     el.innerHTML += `
@@ -603,6 +632,7 @@
 
                 if (type === 'channel') { inputId = 'inputChannel'; previewId = 'previewChannel'; btnId = 'btnAddChannel'; }
                 if (type === 'user') { inputId = 'inputUser'; previewId = 'previewUser'; btnId = 'btnAddUser'; }
+                if (type === 'group') { inputId = 'inputGroup'; previewId = 'previewGroup'; btnId = 'btnAddGroup'; }
                 if (type === 'free') { inputId = 'inputFree'; previewId = 'previewFree'; btnId = 'btnAddFree'; }
 
                 const id = document.getElementById(inputId).value.trim();
@@ -619,7 +649,7 @@
                     previewEl.style.display = 'block';
                     previewEl.innerHTML = '<div style="color:#999;">Verifying...</div>';
                     let apiEndpoint = `/api/validate/${type}`;
-                    if (type === 'free') apiEndpoint = `/api/validate/channel`; // Reuse channel validation
+                    if (type === 'free' || type === 'group') apiEndpoint = `/api/validate/channel`; // Reuse channel validation
 
                     try {
                         const res = await fetch(apiEndpoint, {
@@ -635,6 +665,7 @@
                             let name = info.name || info.username;
 
                             if (type === 'channel' || type === 'free') subInfo = `In: ${info.guildName}`;
+                            if (type === 'group') subInfo = 'Group Chat Found';
                             if (type === 'guild') subInfo = "Server Found";
 
                             previewEl.innerHTML = `
@@ -665,6 +696,7 @@
 
                 if (type === 'channel') { inputId = 'inputChannel'; previewId = 'previewChannel'; btnId = 'btnAddChannel'; }
                 if (type === 'user') { inputId = 'inputUser'; previewId = 'previewUser'; btnId = 'btnAddUser'; }
+                if (type === 'group') { inputId = 'inputGroup'; previewId = 'previewGroup'; btnId = 'btnAddGroup'; }
                 if (type === 'free') { inputId = 'inputFree'; previewId = 'previewFree'; btnId = 'btnAddFree'; }
 
                 // Map type to data key
@@ -681,6 +713,23 @@
                 if (type === 'user') {
                     if (!currentData.dmUsers) currentData.dmUsers = [];
                     addId(currentData.dmUsers, val);
+                }
+                if (type === 'group') {
+                    const isMentionOnly = document.getElementById('chkGroupMention').checked;
+                    if (!currentData.enabledGroups) currentData.enabledGroups = [];
+                    if (!currentData.enabledGroupsMention) currentData.enabledGroupsMention = [];
+
+                    if (isMentionOnly) {
+                        // Add to mention, remove from always if exists
+                        addId(currentData.enabledGroupsMention, val);
+                        currentData.enabledGroups = currentData.enabledGroups.filter(x => x !== val);
+                    } else {
+                        // Add to always, remove from mention if exists
+                        addId(currentData.enabledGroups, val);
+                        currentData.enabledGroupsMention = currentData.enabledGroupsMention.filter(x => x !== val);
+                    }
+                    // Clear checkbox
+                    document.getElementById('chkGroupMention').checked = false;
                 }
                 if (type === 'free') {
                     if (!currentData.freeWillChannels) currentData.freeWillChannels = [];
@@ -706,6 +755,10 @@
                 if (type === 'guild') currentData.enabledServers = currentData.enabledServers.filter(x => x !== id);
                 if (type === 'channel') currentData.enabledChannels = currentData.enabledChannels.filter(x => x !== id);
                 if (type === 'user') currentData.dmUsers = currentData.dmUsers.filter(x => x !== id);
+                if (type === 'group') {
+                    if (currentData.enabledGroups) currentData.enabledGroups = currentData.enabledGroups.filter(x => x !== id);
+                    if (currentData.enabledGroupsMention) currentData.enabledGroupsMention = currentData.enabledGroupsMention.filter(x => x !== id);
+                }
                 if (type === 'free') currentData.freeWillChannels = currentData.freeWillChannels.filter(x => x !== id);
                 await saveData();
                 await loadData();
@@ -762,6 +815,8 @@
                     enabledServers: currentData.enabledServers,
                     enabledChannels: currentData.enabledChannels,
                     dmUsers: currentData.dmUsers,
+                    enabledGroups: currentData.enabledGroups,
+                    enabledGroupsMention: currentData.enabledGroupsMention,
                     freeWillChannels: currentData.freeWillChannels,
                     aiName: currentData.aiName,
                     backstory: currentData.backstory,
