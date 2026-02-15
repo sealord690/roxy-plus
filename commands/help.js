@@ -62,7 +62,7 @@ module.exports = {
         } else {
             // 2. Show All Categories (Main Menu)
             let helpMessage = '```\n';
-            helpMessage += '╭─[ ROXY+ HELP ]─╮\n\n';
+            helpMessage += '╭─[ SEALORD+ HELP ]─╮\n\n';
             helpMessage += '  Available Categories:\n\n';
 
             Object.keys(categories).forEach(cat => {
@@ -73,7 +73,7 @@ module.exports = {
             replyMsg = await message.reply(helpMessage);
         }
 
-        // Auto Delete after 15 seconds
+        // Auto Delete after 5 seconds
         if (replyMsg) {
             setTimeout(() => {
                 replyMsg.delete().catch(() => { });
