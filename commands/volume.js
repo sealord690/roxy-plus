@@ -28,8 +28,8 @@ module.exports = {
                 volume: vol
             });
 
-            const filled = Math.min(20, Math.floor(vol / 10));
-            const empty = Math.max(0, 20 - filled);
+            const filled = Math.min(100, Math.floor(vol / 10));
+            const empty = Math.max(0, 100 - filled);
             const volumeBar = '█'.repeat(filled) + '░'.repeat(empty);
 
             let response = '```js\n';
