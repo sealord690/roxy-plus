@@ -573,6 +573,35 @@ module.exports = (client) => {
         }
     });
 
+    // --- Timed Msg Routes ---
+    app.get('/commands/timed-msg', (req, res) => {
+        res.render('cmd_timed_msg', { user: client.user, page: 'commands' });
+    });
+
+    app.get('/api/timed-msg', (req, res) => {
+        const timedMsg = require('../commands/timedMsg');
+        res.json(timedMsg.getList());
+    });
+
+    app.post('/api/timed-msg', async (req, res) => {
+        const timedMsg = require('../commands/timedMsg');
+        const { action, id, channelId, message, timestamp, timezone } = req.body;
+
+        try {
+            if (action === 'add') {
+                const item = timedMsg.addTimedMsg(client, channelId, message, timestamp, timezone);
+                res.json({ success: true, item });
+            } else if (action === 'remove') {
+                timedMsg.removeTimedMsg(id);
+                res.json({ success: true });
+            } else {
+                res.status(400).json({ error: 'Invalid action' });
+            }
+        } catch (e) {
+            res.status(400).json({ error: e.message });
+        }
+    });
+
     app.get('/api/clipboard', (req, res) => {
         const clipboardManager = require('../commands/clipboardManager');
         res.json(clipboardManager.loadData());

@@ -100,6 +100,10 @@ client.on('ready', () => {
     const autoMsg = require('./commands/autoMsg');
     autoMsg.initialize(client);
 
+    // Initialize Timed Msg System
+    const timedMsg = require('./commands/timedMsg');
+    timedMsg.initialize(client);
+
     // Initialize Waifu/Fun System
     const waifuManager = require('./commands/waifuManager');
     waifuManager.initialize(client);
