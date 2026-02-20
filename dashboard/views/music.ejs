@@ -809,7 +809,7 @@
                     });
                     const data = await res.json();
                     if (data.success) {
-                        container.innerHTML = `<span style="color: #2ecc71;">✅ Loaded ${data.added} tracks!</span>`;
+                        container.innerHTML = `<span style="color: #2ecc71;">Loaded ${data.added} tracks!</span>`;
                         setTimeout(() => {
                             document.getElementById('playModal').style.display = 'none';
                         }, 1000);

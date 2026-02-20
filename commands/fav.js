@@ -34,7 +34,7 @@ module.exports = {
                 case 'add':
                     const queue = client.queueManager.get(message.guild.id);
                     if (!queue || !queue.nowPlaying) {
-                        return message.channel.send('❌ No music is currently playing to add to favorites!');
+                        return message.channel.send('No music is currently playing to add to favorites!');
                     }
 
                     const track = queue.nowPlaying;
@@ -78,7 +78,7 @@ module.exports = {
                     });
                     rmList += '\n╰─────────────────────────╯\n```';
                     await message.channel.send(rmList);
-                    await message.channel.send('Send the song number in chat which you want to remove.');
+                    await message.channel.send('send the song number in chat which you want to remove.');
 
                     const filter = m => !m.author.bot && m.author.id === message.author.id && !isNaN(m.content);
                     const collector = message.channel.createMessageCollector({ filter, time: 30000, max: 1 });
@@ -86,28 +86,28 @@ module.exports = {
                     collector.on('collect', m => {
                         const index = parseInt(m.content) - 1;
                         if (index < 0 || index >= data.fav.length) {
-                            return message.channel.send('❌ Invalid number. Aborted.');
+                            return message.channel.send('are you fucking dumb ?');
                         }
 
                         const removed = data.fav.splice(index, 1);
                         saveFavs(data);
-                        message.channel.send(`🗑️ Removed **${removed[0].title}** from favorites.`);
+                        message.channel.send(`Removed **${removed[0].title}** from favorites.`);
                     });
 
                     collector.on('end', collected => {
                         if (collected.size === 0) {
-                            message.channel.send('Time ran out. Remove action cancelled.');
+                            message.channel.send('bruhh');
                         }
                     });
                     break;
 
                 default:
-                    message.channel.send('Unknown usage! Use `!fav` (adds playing song), `!fav list`, or `!fav remove`.');
+                    message.channel.send('Use `!fav` (adds playing song), `!fav list`, or `!fav remove`.');
                     break;
             }
         } catch (error) {
             console.error('Fav Error:', error);
-            message.channel.send('An error occurred executing this command.');
+            message.channel.send('fucked.');
         }
     }
 };
