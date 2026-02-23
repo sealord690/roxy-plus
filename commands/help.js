@@ -61,15 +61,21 @@ module.exports = {
             }
         } else {
             // 2. Show All Categories (Main Menu)
-            let helpMessage = '```\n';
-            helpMessage += '╭─[ Sealord on top ]─╮\n\n';
-            helpMessage += '  Available Categories:\n\n';
+let helpMessage = '```\n';
+helpMessage += '╔══════════════════════════════════════╗\n';
+helpMessage += '║              SEALORD                 ║\n';
+helpMessage += '║            Command Center            ║\n';
+helpMessage += '╠══════════════════════════════════════╣\n\n';
+helpMessage += '  📚  Available Command Categories:\n\n';
 
-            Object.keys(categories).forEach(cat => {
-                helpMessage += `  📂 ${cat} (Type !help ${cat.toLowerCase()})\n`;
-            });
+Object.keys(categories).forEach(cat => {
+    helpMessage += `  ▸ ${cat}  →  Type: !help ${cat.toLowerCase()}\n`;
+});
 
-            helpMessage += '\n╰──────────────────────────────────╯\n```';
+helpMessage += '\n╠══════════════════════════════════════╣\n';
+helpMessage += '║     Powered by SEALORD Systems       ║\n';
+helpMessage += '╚══════════════════════════════════════╝\n';
+helpMessage += '```';
             replyMsg = await message.reply(helpMessage);
         }
 
