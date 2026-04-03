@@ -427,8 +427,9 @@ module.exports = (client) => {
             res.json({
                 id: channel.id,
                 name: channel.name,
+                guildId: channel.guild?.id,
                 guildName: channel.guild?.name || 'Direct Message',
-                guildIcon: channel.guild?.iconURL({ dynamic: true }) || 'https://cdn.discordapp.com/embed/avatars/0.png' // Added guildIcon
+                guildIcon: channel.guild?.iconURL({ dynamic: true }) || 'https://cdn.discordapp.com/embed/avatars/0.png'
             });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
@@ -467,9 +468,11 @@ module.exports = (client) => {
         });
         const enrichedGroups = [...enrichedGroupsAlways, ...enrichedGroupsMention];
 
-        const enrichedFreeWill = (data.freeWillChannels || []).map(id => {
+        const enrichedFreeWill = (data.freeWillChannels || []).map(item => {
+            const id = typeof item === 'object' ? item.id : item;
+            const delay = typeof item === 'object' ? item.delay : 0;
             const c = client.channels.cache.get(id);
-            return { id, name: c ? c.name : 'Unknown Channel', guildName: c?.guild?.name || 'Unknown', guildIcon: c?.guild?.iconURL({ dynamic: true }) || 'https://cdn.discordapp.com/embed/avatars/0.png' };
+            return { id, delay, name: c ? c.name : 'Unknown Channel', guildName: c?.guild?.name || 'Unknown', guildIcon: c?.guild?.iconURL({ dynamic: true }) || 'https://cdn.discordapp.com/embed/avatars/0.png' };
         });
         const enrichedUsers = (data.dmUsers || []).map(id => {
             const u = client.users.cache.get(id); // Users might not be cached if not seen?
@@ -477,7 +480,12 @@ module.exports = (client) => {
             return { id, username: u ? u.username : 'Unknown User', avatar: u ? u.displayAvatarURL({ dynamic: true }) : 'https://cdn.discordapp.com/embed/avatars/0.png' };
         });
 
-        res.json({ ...data, enrichedServers, enrichedChannels, enrichedGroups, enrichedFreeWill, enrichedUsers });
+        const enrichedBlockedUsers = (data.blockedUsers || []).map(id => {
+            const u = client.users.cache.get(id);
+            return { id, username: u ? u.username : 'Unknown User', avatar: u ? u.displayAvatarURL({ dynamic: true }) : 'https://cdn.discordapp.com/embed/avatars/0.png' };
+        });
+
+        res.json({ ...data, enrichedServers, enrichedChannels, enrichedGroups, enrichedFreeWill, enrichedUsers, enrichedBlockedUsers });
     });
 
     app.post('/api/ai', (req, res) => {
@@ -729,6 +737,72 @@ module.exports = (client) => {
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
+    app.get('/commands/welcomer', (req, res) => {
+        res.render('cmd_welcomer', { user: client.user, page: 'commands' });
+    });
+
+    app.get('/api/welcomer', async (req, res) => {
+        const welcomerManager = require('../commands/welcomerManager');
+        const data = welcomerManager.loadData();
+        const setups = data.welcomeSetups || {};
+
+        // Enrich server info
+        const enrichedList = [];
+        for (const [guildId, val] of Object.entries(setups)) {
+            const guild = client.guilds.cache.get(guildId);
+            let channelName = "Unknown Channel";
+            if (guild) {
+                const c = guild.channels.cache.get(val.channelId);
+                if (c) channelName = c.name;
+            }
+
+            enrichedList.push({
+                guildId,
+                guildName: guild ? guild.name : `Server ${guildId}`,
+                icon: guild && guild.iconURL() ? guild.iconURL({ dynamic: true }) : 'https://cdn.discordapp.com/embed/avatars/0.png',
+                channelId: val.channelId,
+                channelName: channelName,
+                template: val.template,
+                background: val.background,
+                textcolor: val.textcolor,
+                welcomeType: val.welcomeType || 'card',
+                textMessage: val.textMessage || 'hey {user} welcome to the {server} you are {count} member',
+                cardMessage: val.cardMessage || 'WELCOME TO {server}\n{user}\nMember #{count}'
+            });
+        }
+        const config = data.config || { textcolor: 'white', welcomeType: 'card', textMessage: 'hey {user} welcome to the {server} you are {count} member', cardMessage: 'WELCOME TO {server}\n{user}\nMember #{count}' };
+        res.json({ setups: enrichedList, config });
+    });
+
+    app.post('/api/welcomer', (req, res) => {
+        const welcomerManager = require('../commands/welcomerManager');
+        const { action, guildId, channelId, template, background, textcolor, welcomeType, textMessage, cardMessage } = req.body;
+
+        try {
+            if (action === 'add') {
+                welcomerManager.addSetup(guildId, channelId, template, background, textcolor, welcomeType, textMessage, cardMessage);
+            } else if (action === 'remove') {
+                welcomerManager.removeSetup(guildId);
+            } else if (action === 'saveConfig') {
+                const data = welcomerManager.loadData();
+                data.config = { textcolor, welcomeType, textMessage, cardMessage };
+                
+                // Update all existing setups automatically
+                if (!data.welcomeSetups) data.welcomeSetups = {};
+                for (let gid of Object.keys(data.welcomeSetups)) {
+                    data.welcomeSetups[gid].textcolor = textcolor;
+                    data.welcomeSetups[gid].welcomeType = welcomeType;
+                    data.welcomeSetups[gid].textMessage = textMessage;
+                    data.welcomeSetups[gid].cardMessage = cardMessage;
+                }
+                welcomerManager.saveData(data);
+            }
+            res.json({ success: true });
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
     app.get('/commands/:category', (req, res) => {
         const category = req.params.category;
         res.render('commands_sub', {
@@ -771,6 +845,7 @@ module.exports = (client) => {
             duration: 0,
             volume: 100,
             loop: 'none',
+            autoplay: false,
             queue: [],
             queueCount: 0
         };
@@ -788,6 +863,7 @@ module.exports = (client) => {
                 musicData.guildIcon = guild ? guild.iconURL({ dynamic: true, size: 128 }) : null;
                 musicData.volume = queue.volume !== undefined ? queue.volume : 100;
                 musicData.loop = queue.loop || 'none';
+                musicData.autoplay = queue.autoplay || false;
 
                 // Try to find channel name
                 // queue doesn't store channelId? Lavalink might. 
@@ -888,6 +964,7 @@ module.exports = (client) => {
             const queues = client.queueManager ? client.queueManager.getAll() : new Map();
             for (const [guildId, queue] of queues) {
                 if (queue.nowPlaying) {
+                    if (queue.autoplay && queue.songs.length < 5) await client.queueManager.fillAutoplayQueue(client, guildId);
                     const nextSong = client.queueManager.getNext(guildId);
 
                     if (!nextSong) {
@@ -961,6 +1038,49 @@ module.exports = (client) => {
         }
     });
 
+    app.post('/api/music/autoplay', async (req, res) => {
+        const { guildId } = req.body;
+        try {
+            const queue = client.queueManager ? client.queueManager.get(guildId) : null;
+            if (queue && client.lavalink) {
+                queue.autoplay = !queue.autoplay;
+                if (queue.autoplay) {
+                    await client.queueManager.fillAutoplayQueue(client, guildId);
+                }
+                return res.json({ success: true, autoplay: queue.autoplay });
+            }
+            res.json({ success: false, message: 'No active player' });
+        } catch (e) {
+            console.error(e);
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
+
+    app.post('/api/music/seek', async (req, res) => {
+        const { guildId, amount } = req.body;
+        try {
+            const queue = client.queueManager ? client.queueManager.get(guildId) : null;
+            if (queue && client.lavalink && queue.nowPlaying) {
+                let newPosition = queue.position + amount;
+
+                if (newPosition < 0) newPosition = 0;
+                if (newPosition > queue.nowPlaying.info.length) {
+                    newPosition = queue.nowPlaying.info.length - 1000;
+                    if (newPosition < 0) newPosition = 0;
+                }
+
+                await client.lavalink.updatePlayerProperties(guildId, { position: newPosition });
+                queue.position = newPosition;
+                queue.lastUpdate = Date.now();
+                return res.json({ success: true, position: newPosition });
+            }
+            res.json({ success: false, message: 'No active player' });
+        } catch (e) {
+            console.error(e);
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
+
     // fs and path already required at the top
 
     app.get('/api/music/playlists', (req, res) => {
@@ -1025,6 +1145,10 @@ module.exports = (client) => {
                         filters: queue.filters
                     });
                 }
+            }
+
+            if (queue && queue.autoplay && queue.songs.length < 5) {
+                await client.queueManager.fillAutoplayQueue(client, guildId);
             }
 
             res.json({ success: true, added });

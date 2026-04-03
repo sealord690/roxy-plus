@@ -1,4 +1,5 @@
 require('dotenv').config();
+require('./logger').initLogger();
 const { Client } = require('discord.js-selfbot-v13');
 const fs = require('fs');
 const path = require('path');
@@ -120,6 +121,9 @@ if (client.lavalink) {
         const guildId = packet.guild_id;
         if (!voiceStates[guildId]) voiceStates[guildId] = {};
         voiceStates[guildId].sessionId = packet.session_id;
+        if (packet.channel_id) {
+            voiceStates[guildId].channelId = packet.channel_id;
+        }
         console.log(`[Voice] State update for guild ${guildId}`);
     });
 
@@ -155,13 +159,21 @@ if (client.lavalink) {
                     }
                 }
 
-                const nextSong = queueManager.getNext(evt.guildId);
+                let nextSong = queueManager.getNext(evt.guildId);
+
+                // Queue is empty, refill if autoplay is enabled
+                if (queue.autoplay && queue.songs.length < 5) {
+                    await queueManager.fillAutoplayQueue(client, evt.guildId);
+                    if (!nextSong) {
+                        nextSong = queueManager.getNext(evt.guildId);
+                    }
+                }
 
                 if (!nextSong) {
                     await client.lavalink.destroyPlayer(evt.guildId);
                     queueManager.delete(evt.guildId);
                     if (queue.textChannel) {
-                        queue.textChannel.send('```Queue finished```');
+                        queue.textChannel.send('```Queue finished' + (queue.autoplay ? ' (Autoplay failed to find songs)' : '') + '```');
                     }
                     return;
                 }
@@ -214,9 +226,131 @@ setInterval(() => {
     }
 }, 3600000);
 
+// --- WELCOMER SYSTEM ---
+client.on('guildMemberAdd', async member => {
+    try {
+        const welcomerManager = require('./commands/welcomerManager');
+        const setup = welcomerManager.getSetup(member.guild.id);
+
+        if (setup && setup.channelId) {
+            const channel = member.guild.channels.cache.get(setup.channelId);
+            if (channel) {
+                if (setup.welcomeType === 'text') {
+                    let txt = setup.textMessage || 'hey {user} welcome to the {server} you are {count} member';
+                    txt = txt.replace(/{user}/g, `<@${member.user.id}>`);
+                    txt = txt.replace(/{server}/g, member.guild.name || 'Server');
+                    txt = txt.replace(/{count}/g, member.guild.memberCount || 1);
+                    await channel.send(txt);
+                } else {
+                    const { createCanvas, loadImage } = require('canvas');
+                    const fs = require('fs');
+                    const path = require('path');
+
+                // Find custom wallpaper in data folder
+                const dataDir = path.join(__dirname, 'data');
+                const extList = ['.png', '.jpg', '.jpeg', '.webp'];
+                let bgPath = path.join(__dirname, 'dashboard', 'public', 'welcome.jpg'); // Fallback default
+
+                for (const ext of extList) {
+                    const checkPath = path.join(dataDir, `welcome${ext}`);
+                    if (fs.existsSync(checkPath)) {
+                        bgPath = checkPath;
+                        break;
+                    }
+                }
+
+                // Create Canvas (size: 1024x450)
+                const canvas = createCanvas(1024, 450);
+                const ctx = canvas.getContext('2d');
+
+                // Draw background
+                const background = await loadImage(bgPath);
+                ctx.drawImage(background, 0, 0, canvas.width, canvas.height);
+
+                // Draw Semi-Transparent Dark Overlay for text readability
+                ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // Text Sanitization
+                const cleanGuild = member.guild.name.replace(/[^\x00-\x7F]/g, "").trim() || "Server";
+                let cleanUser = member.user.username.replace(/[^\x00-\x7F]/g, "").trim() || "User";
+                if (member.user.discriminator && member.user.discriminator !== '0') {
+                    cleanUser += `#${member.user.discriminator}`;
+                }
+
+                // Set Color based on user setup or default white
+                let userColor = setup.textcolor || '#ffffff';
+                if (/^[0-9A-Fa-f]{6}$/.test(userColor)) userColor = '#' + userColor;
+
+                ctx.textAlign = 'center';
+
+                const lines = (setup.cardMessage || "WELCOME TO {server}\n{user}\nMember #{count}").split('\n');
+                let startY = 290;
+                
+                lines.forEach((line) => {
+                    let parsedLine = line.replace(/{server}/gi, cleanGuild)
+                                         .replace(/{user}/gi, cleanUser)
+                                         .replace(/{count}/gi, member.guild.memberCount.toString());
+                    
+                    if (line.toLowerCase().includes('{user}')) {
+                        ctx.font = 'bold 50px Arial';
+                        ctx.fillStyle = userColor;
+                        startY += 10;
+                    } else {
+                        ctx.font = 'bold 36px Arial';
+                        ctx.fillStyle = '#ffffff';
+                    }
+                    ctx.fillText(parsedLine, canvas.width / 2, startY);
+                    startY += 45;
+                });
+
+                // Draw Avatar Circular Cutout
+                const userAvatar = member.user.displayAvatarURL({ format: 'png', size: 256 }) || 'https://cdn.discordapp.com/embed/avatars/0.png';
+                const avatar = await loadImage(userAvatar);
+
+                const arcX = canvas.width / 2;
+                const arcY = 140;
+                const arcRadius = 90;
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(arcX, arcY, arcRadius, 0, Math.PI * 2, true);
+                ctx.closePath();
+                ctx.clip();
+                ctx.drawImage(avatar, arcX - arcRadius, arcY - arcRadius, arcRadius * 2, arcRadius * 2);
+                ctx.restore();
+
+                // Add Avatar Border
+                ctx.beginPath();
+                ctx.arc(arcX, arcY, arcRadius, 0, Math.PI * 2, true);
+                ctx.closePath();
+                ctx.lineWidth = 8;
+                ctx.strokeStyle = userColor;
+                ctx.stroke();
+
+                const buffer = canvas.toBuffer('image/png');
+
+                await channel.send({
+                    files: [{
+                        attachment: buffer,
+                        name: 'welcome.png'
+                    }]
+                });
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Welcomer Canvas Event Error:', e);
+    }
+});
+
 client.on('messageCreate', async (message) => {
     try {
         if (!message.author) return;
+
+        // --- MIMIC SYSTEM ---
+        const mimicManager = require('./commands/mimicManager');
+        mimicManager.handle(message, client);
 
         // --- AFK & LOGGING SYSTEM ---
         const mentionsMe = message.mentions.users.has(client.user.id);
@@ -310,6 +444,11 @@ client.on('messageCreate', async (message) => {
             const igManager = require('./commands/igManager');
             const igHandled = await igManager.handle(message);
             if (igHandled) return;
+
+            // YouTube Manager
+            const ytManager = require('./commands/ytManager');
+            const ytHandled = await ytManager.handle(message);
+            if (ytHandled) return;
 
             const calculator = require('./commands/calculator');
             // If calculator handled it, return to prevent other command processing (optional, but safe)
@@ -413,8 +552,16 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-process.on('unhandledRejection', error => {
-    console.error('Unhandled promise rejection:', error);
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[Anti-Crash] Unhandled Promise Rejection:\n', reason);
+});
+
+process.on('uncaughtException', (error, origin) => {
+    console.error('[Anti-Crash] Uncaught Exception/Catch:\n', error, '\nOrigin:', origin);
+});
+
+process.on('uncaughtExceptionMonitor', (error, origin) => {
+    console.error('[Anti-Crash] Uncaught Exception Monitor:\n', error, '\nOrigin:', origin);
 });
 
 if (!process.env.TOKEN) {

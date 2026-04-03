@@ -505,12 +505,29 @@
                     <span class="warning-text">⚠ Warning: Can be spammy.</span>
                 </p>
 
-                <input type="text" id="inputFree" class="input-field" placeholder="Paste Channel ID..."
-                    oninput="onWhitelistInput('free')">
+                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                    <input type="text" id="inputFree" class="input-field" placeholder="Paste Channel ID..."
+                        oninput="onWhitelistInput('free')" style="flex: 1;">
+                    <input type="number" id="inputFreeDelay" class="input-field" placeholder="Delay (seconds)" min="0" style="width: 140px;">
+                </div>
                 <div id="previewFree" style="display:none;"></div>
                 <button id="btnAddFree" class="btn-add" disabled onclick="confirmAdd('free')">Add Channel</button>
 
                 <div id="freeList"
+                    style="margin-top:20px; border-top:1px solid rgba(255,255,255,0.1); padding-top:10px;"></div>
+            </div>
+
+            <!-- Blocklist Users -->
+            <div class="section-card" style="border: 1px solid rgba(231, 76, 60, 0.3);">
+                <div class="section-title" style="color:#e74c3c; border-color: rgba(231,76,60,0.2);">Blocklist Users</div>
+                <p style="color:#888; font-size:0.85rem; margin-bottom:15px;">AI will ignore these users completely across all servers and DMs.</p>
+
+                <input type="text" id="inputBlocked" class="input-field" placeholder="Paste User ID..."
+                    oninput="onWhitelistInput('blockuser')">
+                <div id="previewBlocked" style="display:none;"></div>
+                <button id="btnAddBlocked" class="btn-add" style="background: linear-gradient(90deg, #e74c3c, #c0392b); box-shadow: 0 5px 20px rgba(231, 76, 60, 0.3);" disabled onclick="confirmAdd('blockuser')">Block User</button>
+
+                <div id="blockedList"
                     style="margin-top:20px; border-top:1px solid rgba(255,255,255,0.1); padding-top:10px;"></div>
             </div>
         </div>
@@ -528,6 +545,21 @@
                 </div>
                 <label class="switch">
                     <input type="checkbox" id="globalToggle" onchange="updateConfig()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="section-card">
+            <div class="status-row">
+                <div class="status-info">
+                    <span style="font-size: 1.1rem; font-weight:600; color:#fff;">Disable AI Mention/Ping</span>
+                    <p style="color: #aaa; font-size: 0.85rem; margin-top: 5px;">
+                        If enabled, the AI will softly reply to users without constantly pinging/mentioning them.
+                    </p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="disablePing" onchange="updateConfig()">
                     <span class="slider"></span>
                 </label>
             </div>
@@ -560,6 +592,9 @@
                 // I'll stick to: Global Toggle controls "Master Power". 
                 // OR Global Toggle = "Respond to Pings Globally". Default false.
                 // Let's assume Global Toggle means "System Enabled".
+                
+                // Ping Toggle
+                document.getElementById('disablePing').checked = currentData.disablePing || false;
 
                 // Personality
                 document.getElementById('modelType').value = currentData.modelType || 'slow';
@@ -586,6 +621,7 @@
                 renderList('groupList', currentData.enrichedGroups, 'group');
                 renderList('userList', currentData.enrichedUsers, 'user');
                 renderList('freeList', currentData.enrichedFreeWill, 'free');
+                renderList('blockedList', currentData.enrichedBlockedUsers, 'blockuser');
             }
 
             function renderList(elementId, items, type) {
@@ -604,6 +640,9 @@
                     if (type === 'channel' || type === 'free') {
                         name = '#' + name;
                         sub = `in ${item.guildName}`;
+                        if (type === 'free' && item.delay > 0) {
+                            sub += ` <span style="background:#8a2be2; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7em;">${item.delay}s DELAY</span>`;
+                        }
                     }
                     if (type === 'group') {
                         sub = 'Group Chat';
@@ -634,6 +673,7 @@
                 if (type === 'user') { inputId = 'inputUser'; previewId = 'previewUser'; btnId = 'btnAddUser'; }
                 if (type === 'group') { inputId = 'inputGroup'; previewId = 'previewGroup'; btnId = 'btnAddGroup'; }
                 if (type === 'free') { inputId = 'inputFree'; previewId = 'previewFree'; btnId = 'btnAddFree'; }
+                if (type === 'blockuser') { inputId = 'inputBlocked'; previewId = 'previewBlocked'; btnId = 'btnAddBlocked'; }
 
                 const id = document.getElementById(inputId).value.trim();
                 const previewEl = document.getElementById(previewId);
@@ -650,6 +690,7 @@
                     previewEl.innerHTML = '<div style="color:#999;">Verifying...</div>';
                     let apiEndpoint = `/api/validate/${type}`;
                     if (type === 'free' || type === 'group') apiEndpoint = `/api/validate/channel`; // Reuse channel validation
+                    if (type === 'blockuser') apiEndpoint = `/api/validate/user`; 
 
                     try {
                         const res = await fetch(apiEndpoint, {
@@ -698,6 +739,7 @@
                 if (type === 'user') { inputId = 'inputUser'; previewId = 'previewUser'; btnId = 'btnAddUser'; }
                 if (type === 'group') { inputId = 'inputGroup'; previewId = 'previewGroup'; btnId = 'btnAddGroup'; }
                 if (type === 'free') { inputId = 'inputFree'; previewId = 'previewFree'; btnId = 'btnAddFree'; }
+                if (type === 'blockuser') { inputId = 'inputBlocked'; previewId = 'previewBlocked'; btnId = 'btnAddBlocked'; }
 
                 // Map type to data key
                 const val = document.getElementById(inputId).value.trim();
@@ -713,6 +755,10 @@
                 if (type === 'user') {
                     if (!currentData.dmUsers) currentData.dmUsers = [];
                     addId(currentData.dmUsers, val);
+                }
+                if (type === 'blockuser') {
+                    if (!currentData.blockedUsers) currentData.blockedUsers = [];
+                    addId(currentData.blockedUsers, val);
                 }
                 if (type === 'group') {
                     const isMentionOnly = document.getElementById('chkGroupMention').checked;
@@ -732,15 +778,24 @@
                     document.getElementById('chkGroupMention').checked = false;
                 }
                 if (type === 'free') {
-                    if (!currentData.freeWillChannels) currentData.freeWillChannels = [];
-                    addId(currentData.freeWillChannels, val);
-                }
+                        let delayVal = parseInt(document.getElementById('inputFreeDelay').value) || 0;
+                        if (!currentData.freeWillChannels) currentData.freeWillChannels = [];
+                        
+                        // Check if already exists and update or add new
+                        const existingIndex = currentData.freeWillChannels.findIndex(x => typeof x === 'object' ? x.id === val : x === val);
+                        if (existingIndex >= 0) {
+                            currentData.freeWillChannels[existingIndex] = { id: val, delay: delayVal };
+                        } else {
+                            currentData.freeWillChannels.push({ id: val, delay: delayVal });
+                        }
+                    }
 
                 await saveData();
                 await loadData();
 
                 // Reset UI
                 document.getElementById(inputId).value = '';
+                if (type === 'free') document.getElementById('inputFreeDelay').value = '';
                 document.getElementById(previewId).style.display = 'none';
                 document.getElementById(previewId).innerHTML = '';
                 document.getElementById(btnId).disabled = true;
@@ -755,11 +810,12 @@
                 if (type === 'guild') currentData.enabledServers = currentData.enabledServers.filter(x => x !== id);
                 if (type === 'channel') currentData.enabledChannels = currentData.enabledChannels.filter(x => x !== id);
                 if (type === 'user') currentData.dmUsers = currentData.dmUsers.filter(x => x !== id);
+                if (type === 'blockuser') currentData.blockedUsers = currentData.blockedUsers.filter(x => x !== id);
                 if (type === 'group') {
                     if (currentData.enabledGroups) currentData.enabledGroups = currentData.enabledGroups.filter(x => x !== id);
                     if (currentData.enabledGroupsMention) currentData.enabledGroupsMention = currentData.enabledGroupsMention.filter(x => x !== id);
                 }
-                if (type === 'free') currentData.freeWillChannels = currentData.freeWillChannels.filter(x => x !== id);
+                if (type === 'free') currentData.freeWillChannels = currentData.freeWillChannels.filter(x => typeof x === 'object' ? x.id !== id : x !== id);
                 await saveData();
                 await loadData();
             }
@@ -804,6 +860,7 @@
 
             async function updateConfig() {
                 currentData.global = document.getElementById('globalToggle').checked;
+                currentData.disablePing = document.getElementById('disablePing').checked;
                 await saveData();
                 render(); // No fetch needed usually but consistent
             }
@@ -823,7 +880,9 @@
                     personality: currentData.personality,
                     rules: currentData.rules,
                     modelType: currentData.modelType,
-                    bannedWords: currentData.bannedWords
+                    bannedWords: currentData.bannedWords,
+                    disablePing: currentData.disablePing,
+                    blockedUsers: currentData.blockedUsers
                 };
 
                 try {
