@@ -115,48 +115,79 @@ async function generateReply(userId, userContent) {
     // Append current message
     messages.push({ role: "user", content: userContent });
 
-    // Determine Model Parameters
     let modelName = "moonshotai/kimi-k2.6";
-    let temp = 1.0;
+    let temp = 1.00;
     let maxTokens = 16384;
-    let topP = 1.0;
+    let topP = 1.00;
     let extraParams = {
         chat_template_kwargs: { thinking: true }
     };
 
     if (config.modelType === "fast") {
-        modelName = "mistralai/mistral-small-4-119b-2603";
-        temp = 0.10;
-        maxTokens = 16384;
-        topP = 1.0;
+        modelName = "qwen/qwen3.5-397b-a17b";
+        temp = 0.70;
+        topP = 0.80;
         extraParams = {
-            reasoning_effort: "high"
+            top_k: 20,
+            presence_penalty: 0,
+            repetition_penalty: 1,
+            chat_template_kwargs: { enable_thinking: false }
         };
     }
 
     try {
-        const completion = await openai.chat.completions.create({
-            model: modelName,
-            messages: messages,
-            temperature: temp,
-            top_p: topP,
-            max_tokens: maxTokens,
-            stream: true,
-            ...extraParams
+        const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.AI_API}`,
+                'Accept': 'text/event-stream',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: modelName,
+                messages: messages,
+                temperature: temp,
+                top_p: topP,
+                max_tokens: maxTokens,
+                stream: true,
+                ...extraParams
+            })
         });
 
-        let fullContent = "";
-        let fullReasoning = "";
+        if (!response.ok) {
+            console.error(`[AI] HTTP Error: ${response.status} ${await response.text()}`);
+            return "what you mean?";
+        }
 
-        for await (const chunk of completion) {
-            const delta = chunk.choices[0]?.delta;
-            if (delta?.reasoning_content) {
-                fullReasoning += delta.reasoning_content;
-                // process.stdout.write(delta.reasoning_content); // Hidden
-            }
-            if (delta?.content) {
-                fullContent += delta.content;
-                // process.stdout.write(delta.content); // Hidden
+        let fullContent = "";
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            let newlineIndex;
+            while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+                const line = buffer.slice(0, newlineIndex).trim();
+                buffer = buffer.slice(newlineIndex + 1);
+
+                if (line.startsWith('data: ')) {
+                    const dataStr = line.slice(6).trim();
+                    if (dataStr === '[DONE]') continue;
+                    try {
+                        const data = JSON.parse(dataStr);
+                        const delta = data.choices?.[0]?.delta;
+                        if (delta?.content) {
+                            fullContent += delta.content;
+                        }
+                    } catch (e) {
+                    }
+                } else if (line.startsWith('event: error')) {
+                    console.error("[AI] Nvidia Stream Error Event Received.");
+                }
             }
         }
 
@@ -168,9 +199,10 @@ async function generateReply(userId, userContent) {
         // Save to history
         if (fullContent.trim()) {
             await addHistory(userId, userContent, fullContent);
+            return fullContent;
         }
 
-        return fullContent;
+        return "what you mean?";
 
     } catch (error) {
         console.error("[AI] Error generating reply:", error);
@@ -243,7 +275,7 @@ function initialize(client) {
                         freeWillDelay = typeof fwItem === 'object' ? (fwItem.delay || 0) : 0;
                     }
                 }
-                
+
                 // Check Mention/Reply triggers
                 if (!isFreeWill) {
                     const isMentioned = message.mentions.users.has(client.user.id);
@@ -286,9 +318,9 @@ function initialize(client) {
 
                     if (reply && reply.trim().length > 0) {
                         try {
-                            await message.reply({ 
-                                content: reply, 
-                                allowedMentions: { repliedUser: !config.disablePing } 
+                            await message.reply({
+                                content: reply,
+                                allowedMentions: { repliedUser: !config.disablePing }
                             });
                         } catch (e) {
                             // Fallback: If reply fails (e.g. Invalid Form Body), try normal send
@@ -302,11 +334,11 @@ function initialize(client) {
                 if (isFreeWill && freeWillDelay > 0) {
                     if (!client.freeWillQueues) client.freeWillQueues = new Map();
                     const currentQueue = client.freeWillQueues.get(channelId) || Promise.resolve();
-                    
+
                     const nextQueue = currentQueue
                         .then(() => processReply())
                         .catch(err => console.error("[AI Queue Error]:", err));
-                        
+
                     client.freeWillQueues.set(channelId, nextQueue);
                 } else {
                     // Normal execution for mentions, whitelisted channels, etc.
