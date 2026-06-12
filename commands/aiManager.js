@@ -3,8 +3,13 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-const CONFIG_PATH = path.join(__dirname, '../data/ai_config.json');
-const HISTORY_PATH = path.join(__dirname, '../data/chat_history.json');
+function getPaths(client) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    return {
+        CONFIG_PATH: path.join(__dirname, '..', folder, 'ai_config.json'),
+        HISTORY_PATH: path.join(__dirname, '..', folder, 'chat_history.json')
+    };
+}
 
 // Initialize API
 const openai = new OpenAI({
@@ -31,8 +36,9 @@ const DEFAULT_CONFIG = {
     blockedUsers: []
 };
 
-function loadData() {
+function loadData(client) {
     try {
+        const { CONFIG_PATH } = getPaths(client);
         if (!fs.existsSync(CONFIG_PATH)) {
             const dir = path.dirname(CONFIG_PATH);
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -53,12 +59,13 @@ function loadData() {
     }
 }
 
-function saveData(data) {
+function saveData(client, data) {
     try {
+        const { CONFIG_PATH } = getPaths(client);
         const dir = path.dirname(CONFIG_PATH);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         // Merge with existing to preserve unseen keys
-        const existing = loadData();
+        const existing = loadData(client);
         const finalData = { ...existing, ...data };
         fs.writeFileSync(CONFIG_PATH, JSON.stringify(finalData, null, 4));
     } catch (e) {
@@ -66,7 +73,8 @@ function saveData(data) {
     }
 }
 
-function loadHistory() {
+function loadHistory(client) {
+    const { HISTORY_PATH } = getPaths(client);
     if (!fs.existsSync(HISTORY_PATH)) {
         fs.writeFileSync(HISTORY_PATH, JSON.stringify({}, null, 4));
         return {};
@@ -74,12 +82,13 @@ function loadHistory() {
     return JSON.parse(fs.readFileSync(HISTORY_PATH, 'utf8'));
 }
 
-function saveHistory(history) {
+function saveHistory(client, history) {
+    const { HISTORY_PATH } = getPaths(client);
     fs.writeFileSync(HISTORY_PATH, JSON.stringify(history, null, 4));
 }
 
-function getContext(userId, config) {
-    const history = loadHistory();
+function getContext(client, userId, config) {
+    const history = loadHistory(client);
     const userHistory = history[userId] || [];
 
     // System Prompt
@@ -92,8 +101,8 @@ function getContext(userId, config) {
     return messages;
 }
 
-async function addHistory(userId, userContent, aiContent) {
-    let history = loadHistory();
+async function addHistory(client, userId, userContent, aiContent) {
+    let history = loadHistory(client);
     if (!history[userId]) history[userId] = [];
 
     history[userId].push({ role: "user", content: userContent });
@@ -104,13 +113,13 @@ async function addHistory(userId, userContent, aiContent) {
         history[userId] = history[userId].slice(history[userId].length - 10);
     }
 
-    saveHistory(history);
+    saveHistory(client, history);
 }
 
 // Core Chat Function
-async function generateReply(userId, userContent) {
-    const config = loadData();
-    const messages = getContext(userId, config);
+async function generateReply(client, userId, userContent) {
+    const config = loadData(client);
+    const messages = getContext(client, userId, config);
 
     // Append current message
     messages.push({ role: "user", content: userContent });
@@ -198,7 +207,7 @@ async function generateReply(userId, userContent) {
 
         // Save to history
         if (fullContent.trim()) {
-            await addHistory(userId, userContent, fullContent);
+            await addHistory(client, userId, userContent, fullContent);
             return fullContent;
         }
 
@@ -226,7 +235,7 @@ function initialize(client) {
             const ignoredTypes = ['RECIPIENT_ADD', 'RECIPIENT_REMOVE', 'CALL', 'CHANNEL_NAME_CHANGE', 'CHANNEL_ICON_CHANGE', 'PINS_ADD'];
             if (ignoredTypes.includes(message.type)) return;
 
-            const config = loadData();
+            const config = loadData(client);
             const content = message.content;
             const guildId = message.guild?.id;
             const channelId = message.channel.id;
@@ -306,7 +315,7 @@ function initialize(client) {
                     // Generate
                     // Prepend username for context
                     const effectiveContent = `(User: ${message.author.username}) ${content}`;
-                    const reply = await generateReply(authorId, effectiveContent);
+                    const reply = await generateReply(client, authorId, effectiveContent);
 
                     if (freeWillDelay > 0) {
                         const timeTaken = Date.now() - startTime;
