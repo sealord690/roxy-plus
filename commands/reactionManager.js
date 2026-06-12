@@ -1,39 +1,50 @@
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const FILE = path.join(DATA_DIR, 'autoreactions.json');
+const clientConfigs = {};
 
-let config = {
+const defaultConfig = {
     global: true,
-    enabledServers: [], // Array of Guild IDs
-    enabledChannels: [], // Array of Channel IDs
-    textTriggers: {}, // { "trigger": ["emoji1", "emoji2"] }
-    userTriggers: {}  // { "userId": ["emoji1"] }
+    enabledServers: [],
+    enabledChannels: [],
+    textTriggers: {},
+    userTriggers: {}
 };
 
-function loadData() {
-    if (!fs.existsSync(FILE)) return config;
+function getFile(client) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    return path.join(__dirname, '..', folder, 'autoreactions.json');
+}
+
+function loadData(client) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    const file = getFile(client);
+    if (!fs.existsSync(file)) return { ...defaultConfig };
     try {
-        const data = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-        config = {
+        const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+        const config = {
             global: data.global ?? true,
             enabledServers: data.enabledServers || [],
             enabledChannels: data.enabledChannels || [],
             textTriggers: data.textTriggers || {},
             userTriggers: data.userTriggers || {}
         };
+        clientConfigs[folder] = config;
         return config;
-    } catch (e) { return config; }
+    } catch (e) { return { ...defaultConfig }; }
 }
 
-function saveData(newConfig) {
-    if (newConfig) config = newConfig;
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(FILE, JSON.stringify(config, null, 2));
+function saveData(client, newConfig) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    if (newConfig) clientConfigs[folder] = newConfig;
+    const dataDir = path.join(__dirname, '..', folder);
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(getFile(client), JSON.stringify(clientConfigs[folder] || newConfig, null, 2));
 }
 
-function isReactionEnabled(channelId, guildId) {
+function isReactionEnabled(client, channelId, guildId) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    const config = clientConfigs[folder] || loadData(client);
     if (config.enabledChannels.includes(channelId)) return true;
     if (guildId && config.enabledServers.includes(guildId)) return true;
     return config.global;
@@ -44,21 +55,17 @@ module.exports = {
     saveData,
 
     initialize: (client) => {
-        console.log('[AutoReaction] Initializing...');
-        loadData();
+        console.log('[AutoReaction] Initializing for', client.user?.tag || 'Unknown');
+        loadData(client);
 
         client.on('messageCreate', async (message) => {
             if ((message.author.bot && message.author.id !== client.user.id) || !message.guild) return; // Ignore other bots/DMs usually
             // Prevent ignoring self to allow selfbot to react to own messages
 
-            // Check if enabled
-            // Note: If global is TRUE, it works everywhere unless restricted?
-            // The example logic: 
-            // 1. Channel specific -> True
-            // 2. Server specific -> True
-            // 3. Fallback -> Global
-            // This means if Global is True, it works everywhere. If Global is False, only works in Whitelisted Channels/Servers.
-            if (!isReactionEnabled(message.channel.id, message.guild.id)) return;
+            if (!isReactionEnabled(client, message.channel.id, message.guild.id)) return;
+
+            const folder = client && client.dataFolder ? client.dataFolder : 'data';
+            const config = clientConfigs[folder] || loadData(client);
 
             try {
                 // User Triggers
