@@ -4,13 +4,40 @@ const fs = require('fs');
 const QuestManager = require('../quests/manager'); // Import QuestManager
 const app = express();
 
-module.exports = (client) => {
+module.exports = (clients) => {
+    // Middleware to set active client
+    app.use((req, res, next) => {
+        if (!req.url.startsWith('/css') && !req.url.startsWith('/js') && !req.url.startsWith('/img')) {
+            let activeKey = req.cookies.active_client || 'TOKEN';
+            req.client = clients.find(c => c.tokenKey === activeKey);
+            if (!req.client && clients.length > 0) req.client = clients[0];
+            res.locals.clients = clients;
+            res.locals.activeClientKey = req.client ? req.client.tokenKey : null;
+            res.locals.clientUser = req.client ? req.client.user : null;
+        }
+        next();
+    });
+
+    // API to switch client
+    app.post('/api/switch_client', (req, res) => {
+        const { key } = req.body;
+        if (clients.find(c => c.tokenKey === key)) {
+            res.cookie('active_client', key, { maxAge: 30 * 24 * 60 * 60 * 1000 });
+            res.json({ success: true });
+        } else {
+            res.json({ success: false });
+        }
+    });
+
+    const MULTI_QUEST_MANAGERS = new Map();
+    for (const c of clients) {
+        MULTI_QUEST_MANAGERS.set(c.tokenKey, new QuestManager(c.token));
+    }
+
     const port = process.env.PORT || 3000;
 
     // Initialize Quest Manager
-    const questManager = new QuestManager(process.env.TOKEN || client.token);
-
-    // Set view engine
+        // Set view engine
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, 'views'));
 
@@ -196,16 +223,16 @@ module.exports = (client) => {
     _runMetrics();
 
     app.get('/', (req, res) => {
-        if (!client.user) {
+        if (!req.client.user) {
             return res.send('Bot is not ready yet. Please refresh in a moment.');
         }
 
         // Calculate initial uptime in seconds
-        const uptimeSeconds = Math.floor(client.uptime / 1000);
+        const uptimeSeconds = Math.floor(req.client.uptime / 1000);
 
         // Load persisted status data
         const statusManager = require('../commands/statusManager');
-        const statusData = statusManager.loadData();
+        const statusData = statusManager.loadData(req.client);
 
         // Use persisted data, falling back to defaults if necessary
         const status = statusData.status || 'online';
@@ -213,7 +240,7 @@ module.exports = (client) => {
         const currentEmoji = statusData.emoji || '';
 
         res.render('index', {
-            user: client.user,
+            user: req.client.user,
             uptimeSeconds,
             status: status,
             currentActivity,
@@ -227,7 +254,7 @@ module.exports = (client) => {
             const { status, custom_status, emoji } = req.body;
 
             const statusManager = require('../commands/statusManager');
-            statusManager.saveData({
+            statusManager.saveData(req.client, {
                 status: status,
                 custom_status: custom_status,
                 emoji: emoji
@@ -235,7 +262,7 @@ module.exports = (client) => {
 
             // Trigger update via RPC Manager (which merges RPC + Status)
             const rpcManager = require('../commands/rpcManager');
-            await rpcManager.setPresence(client, rpcManager.loadData());
+            await rpcManager.setPresence(req.client, client, rpcManager.loadData(req.client));
 
             if (req.xhr || req.headers.accept && req.headers.accept.indexOf('json') > -1) {
                 return res.json({ success: true, message: 'Status updated!' });
@@ -264,40 +291,40 @@ module.exports = (client) => {
     // --- QUEST ROUTES ---
 
     app.get('/quest', (req, res) => {
-        if (!client.user) return res.send('Bot loading...');
+        if (!req.client.user) return res.send('Bot loading...');
         res.render('quest', {
-            user: client.user,
+            user: req.client.user,
             page: 'quest'
         });
     });
 
     app.post('/quest/start-all', (req, res) => {
-        questManager.startAll(); // Async background
+        MULTI_QUEST_MANAGERS.get(req.client.tokenKey).startAll(); // Async background
         res.json({ success: true, message: 'Starting process...' });
     });
 
     app.post('/quest/stop-all', (req, res) => {
-        questManager.stopAll();
+        MULTI_QUEST_MANAGERS.get(req.client.tokenKey).stopAll();
         res.json({ success: true, message: 'All quests stopped.' });
     });
 
     app.post('/quest/clear-logs', (req, res) => {
-        if (questManager.clearLogs) questManager.clearLogs();
+        if (MULTI_QUEST_MANAGERS.get(req.client.tokenKey).clearLogs) MULTI_QUEST_MANAGERS.get(req.client.tokenKey).clearLogs();
         res.json({ success: true });
     });
 
     app.get('/api/quests', (req, res) => {
         res.json({
             // active: ... (optional, if we want visuals later)
-            logs: questManager.globalLogs,
-            isRunning: questManager.isRunning
+            logs: MULTI_QUEST_MANAGERS.get(req.client.tokenKey).globalLogs,
+            isRunning: MULTI_QUEST_MANAGERS.get(req.client.tokenKey).isRunning
         });
     });
 
     // --- AFK Routes ---
 
     app.get('/afk', (req, res) => {
-        if (!client.user) return res.send('Bot loading...');
+        if (!req.client.user) return res.send('Bot loading...');
 
         const afkPath = path.join(__dirname, '..', 'data', 'afk.json');
         const logPath = path.join(__dirname, '..', 'data', 'afklog.json');
@@ -309,7 +336,7 @@ module.exports = (client) => {
         if (fs.existsSync(logPath)) logs = JSON.parse(fs.readFileSync(logPath, 'utf8'));
 
         res.render('afk', {
-            user: client.user,
+            user: req.client.user,
             afkData,
             logs,
             page: 'afk'
@@ -365,39 +392,39 @@ module.exports = (client) => {
 
     // --- COMMANDS Routes ---
     app.get('/commands', (req, res) => {
-        if (!client.user) return res.send('Bot loading...');
+        if (!req.client.user) return res.send('Bot loading...');
         res.render('commands', {
-            user: client.user,
+            user: req.client.user,
             page: 'commands'
         });
     });
 
     app.get('/commands/rpc', (req, res) => {
-        res.render('cmd_rpc', { user: client.user, page: 'commands' });
+        res.render('cmd_rpc', { user: req.client.user, page: 'commands' });
     });
 
     // RPC API
     app.get('/api/rpc', (req, res) => {
         const rpcManager = require('../commands/rpcManager');
-        res.json(rpcManager.loadData());
+        res.json(rpcManager.loadData(req.client));
     });
 
     app.post('/api/rpc', async (req, res) => {
         const rpcManager = require('../commands/rpcManager');
         const data = req.body;
-        rpcManager.saveData(data);
-        await rpcManager.setPresence(client, data);
+        rpcManager.saveData(req.client, data);
+        await rpcManager.setPresence(req.client, client, data);
         res.json({ success: true });
     });
 
     // Auto Reaction API
     app.get('/api/reaction', (req, res) => {
         const reactionManager = require('../commands/reactionManager');
-        const data = reactionManager.loadData();
+        const data = reactionManager.loadData(req.client);
 
         // Enrich Servers
         const enrichedServers = (data.enabledServers || []).map(id => {
-            const g = client.guilds.cache.get(id);
+            const g = req.client.guilds.cache.get(id);
             return {
                 id,
                 name: g ? g.name : `Unknown Server`,
@@ -407,7 +434,7 @@ module.exports = (client) => {
 
         // Enrich Channels
         const enrichedChannels = (data.enabledChannels || []).map(id => {
-            const c = client.channels.cache.get(id);
+            const c = req.client.channels.cache.get(id);
             return {
                 id,
                 name: c ? c.name : `Unknown Channel`,
@@ -421,7 +448,7 @@ module.exports = (client) => {
 
     app.post('/api/reaction', (req, res) => {
         const reactionManager = require('../commands/reactionManager');
-        reactionManager.saveData(req.body);
+        reactionManager.saveData(req.client, req.body);
         res.json({ success: true });
     });
 
@@ -429,7 +456,7 @@ module.exports = (client) => {
     app.post('/api/validate/guild', async (req, res) => {
         const { id } = req.body;
         try {
-            const guild = client.guilds.cache.get(id);
+            const guild = req.client.guilds.cache.get(id);
             if (!guild) return res.status(404).json({ error: 'Server not found (Bot must be in it)' });
             res.json({
                 id: guild.id,
@@ -442,7 +469,7 @@ module.exports = (client) => {
     app.post('/api/validate/channel', async (req, res) => {
         const { id } = req.body;
         try {
-            const channel = client.channels.cache.get(id);
+            const channel = req.client.channels.cache.get(id);
             if (!channel) return res.status(404).json({ error: 'Channel not found' });
             res.json({
                 id: channel.id,
@@ -456,32 +483,32 @@ module.exports = (client) => {
 
     // --- AI Chat Routes ---
     app.get('/ai', (req, res) => {
-        res.render('cmd_ai', { user: client.user, page: 'ai' }); // page 'ai' for highlighting if added to menu
+        res.render('cmd_ai', { user: req.client.user, page: 'ai' }); // page 'ai' for highlighting if added to menu
     });
 
     app.get('/api/ai', (req, res) => {
         const aiManager = require('../commands/aiManager');
-        const data = aiManager.loadData();
+        const data = aiManager.loadData(req.client);
 
         // Enrich Data for UI (Server/Channel/User names)
         // Similar to Reaction, we want to show nice lists
 
         const enrichedServers = (data.enabledServers || []).map(id => {
-            const g = client.guilds.cache.get(id);
+            const g = req.client.guilds.cache.get(id);
             return { id, name: g ? g.name : 'Unknown Server', icon: g ? g.iconURL({ dynamic: true }) : 'https://cdn.discordapp.com/embed/avatars/0.png' };
         });
         const enrichedChannels = (data.enabledChannels || []).map(id => {
-            const c = client.channels.cache.get(id);
+            const c = req.client.channels.cache.get(id);
             return { id, name: c ? c.name : 'Unknown Channel', guildName: c?.guild?.name || 'Unknown', guildIcon: c?.guild?.iconURL({ dynamic: true }) || 'https://cdn.discordapp.com/embed/avatars/0.png' };
         });
         const enrichedGroupsAlways = (data.enabledGroups || []).map(id => {
-            const c = client.channels.cache.get(id);
+            const c = req.client.channels.cache.get(id);
             let name = c ? c.name : 'Unknown Channel/Group';
             if (c && !name && c.recipients) name = c.recipients.map(u => u.username).join(', ');
             return { id, name, mode: 'always' };
         });
         const enrichedGroupsMention = (data.enabledGroupsMention || []).map(id => {
-            const c = client.channels.cache.get(id);
+            const c = req.client.channels.cache.get(id);
             let name = c ? c.name : 'Unknown Channel/Group';
             if (c && !name && c.recipients) name = c.recipients.map(u => u.username).join(', ');
             return { id, name, mode: 'mention' };
@@ -491,17 +518,17 @@ module.exports = (client) => {
         const enrichedFreeWill = (data.freeWillChannels || []).map(item => {
             const id = typeof item === 'object' ? item.id : item;
             const delay = typeof item === 'object' ? item.delay : 0;
-            const c = client.channels.cache.get(id);
+            const c = req.client.channels.cache.get(id);
             return { id, delay, name: c ? c.name : 'Unknown Channel', guildName: c?.guild?.name || 'Unknown', guildIcon: c?.guild?.iconURL({ dynamic: true }) || 'https://cdn.discordapp.com/embed/avatars/0.png' };
         });
         const enrichedUsers = (data.dmUsers || []).map(id => {
-            const u = client.users.cache.get(id); // Users might not be cached if not seen?
+            const u = req.client.users.cache.get(id); // Users might not be cached if not seen?
             // Selfbots usually have large cache if they are in servers.
             return { id, username: u ? u.username : 'Unknown User', avatar: u ? u.displayAvatarURL({ dynamic: true }) : 'https://cdn.discordapp.com/embed/avatars/0.png' };
         });
 
         const enrichedBlockedUsers = (data.blockedUsers || []).map(id => {
-            const u = client.users.cache.get(id);
+            const u = req.client.users.cache.get(id);
             return { id, username: u ? u.username : 'Unknown User', avatar: u ? u.displayAvatarURL({ dynamic: true }) : 'https://cdn.discordapp.com/embed/avatars/0.png' };
         });
 
@@ -510,14 +537,14 @@ module.exports = (client) => {
 
     app.post('/api/ai', (req, res) => {
         const aiManager = require('../commands/aiManager');
-        aiManager.saveData(req.body);
+        aiManager.saveData(req.client, req.body);
         res.json({ success: true });
     });
 
     app.post('/api/validate/user', async (req, res) => {
         const { id } = req.body;
         try {
-            const user = await client.users.fetch(id).catch(() => null);
+            const user = await req.client.users.fetch(id).catch(() => null);
             if (!user) return res.status(404).json({ error: 'User not found' });
             res.json({
                 id: user.id,
@@ -532,7 +559,7 @@ module.exports = (client) => {
         const { id } = req.body;
         try {
             // Check Channel First
-            const channel = await client.channels.fetch(id).catch(() => null);
+            const channel = await req.client.channels.fetch(id).catch(() => null);
             if (channel) {
                 // Must be text-based to send messages
                 if (!channel.isText()) return res.status(400).json({ error: 'Channel is not a text channel' });
@@ -546,7 +573,7 @@ module.exports = (client) => {
             }
 
             // Check User Second
-            const user = await client.users.fetch(id).catch(() => null);
+            const user = await req.client.users.fetch(id).catch(() => null);
             if (user) {
                 return res.json({
                     type: 'user',
@@ -562,23 +589,23 @@ module.exports = (client) => {
     });
 
     app.get('/commands/reaction', (req, res) => {
-        res.render('cmd_reaction', { user: client.user, page: 'commands' });
+        res.render('cmd_reaction', { user: req.client.user, page: 'commands' });
     });
     app.get('/commands/mirror', (req, res) => {
-        res.render('cmd_mirror', { user: client.user, page: 'commands' });
+        res.render('cmd_mirror', { user: req.client.user, page: 'commands' });
     });
     app.get('/commands/clipboard', (req, res) => {
-        res.render('cmd_clipboard', { user: client.user, page: 'commands' });
+        res.render('cmd_clipboard', { user: req.client.user, page: 'commands' });
     });
 
     // --- Auto Msg Routes ---
     app.get('/commands/auto-msg', (req, res) => {
-        res.render('cmd_auto_msg', { user: client.user, page: 'commands' });
+        res.render('cmd_auto_msg', { user: req.client.user, page: 'commands' });
     });
 
     app.get('/api/auto-msg', (req, res) => {
         const autoMsg = require('../commands/autoMsg');
-        res.json(autoMsg.getList());
+        res.json(autoMsg.getList(req.client));
     });
 
     app.post('/api/auto-msg', async (req, res) => {
@@ -590,10 +617,10 @@ module.exports = (client) => {
                 // Validate permissions one last time logic?
                 // The frontend checks, but backend should too ideally.
                 // startTimer throws if invalid.
-                await autoMsg.startTimer(client, channelId, message, interval, unit);
-                autoMsg.addAutoMsg(channelId, message, interval, unit); // Save if start success
+                await autoMsg.startTimer(req.client, client, channelId, message, interval, unit);
+                autoMsg.addAutoMsg(req.client, channelId, message, interval, unit); // Save if start success
             } else if (action === 'remove') {
-                autoMsg.removeAutoMsg(channelId);
+                autoMsg.removeAutoMsg(req.client, channelId);
             }
             res.json({ success: true });
         } catch (e) {
@@ -603,12 +630,12 @@ module.exports = (client) => {
 
     // --- Timed Msg Routes ---
     app.get('/commands/timed-msg', (req, res) => {
-        res.render('cmd_timed_msg', { user: client.user, page: 'commands' });
+        res.render('cmd_timed_msg', { user: req.client.user, page: 'commands' });
     });
 
     app.get('/api/timed-msg', (req, res) => {
         const timedMsg = require('../commands/timedMsg');
-        res.json(timedMsg.getList());
+        res.json(timedMsg.getList(req.client));
     });
 
     app.post('/api/timed-msg', async (req, res) => {
@@ -617,10 +644,10 @@ module.exports = (client) => {
 
         try {
             if (action === 'add') {
-                const item = timedMsg.addTimedMsg(client, channelId, message, timestamp, timezone);
+                const item = timedMsg.addTimedMsg(req.client, client, channelId, message, timestamp, timezone);
                 res.json({ success: true, item });
             } else if (action === 'remove') {
-                timedMsg.removeTimedMsg(id);
+                timedMsg.removeTimedMsg(req.client, id);
                 res.json({ success: true });
             } else {
                 res.status(400).json({ error: 'Invalid action' });
@@ -632,7 +659,7 @@ module.exports = (client) => {
 
     app.get('/api/clipboard', (req, res) => {
         const clipboardManager = require('../commands/clipboardManager');
-        res.json(clipboardManager.loadData());
+        res.json(clipboardManager.loadData(req.client));
     });
 
     app.post('/api/clipboard', (req, res) => {
@@ -640,25 +667,25 @@ module.exports = (client) => {
         const { action, trigger, response } = req.body;
 
         if (action === 'add') {
-            clipboardManager.addTrigger(trigger, response);
+            clipboardManager.addTrigger(req.client, trigger, response);
         } else if (action === 'remove') {
-            clipboardManager.removeTrigger(trigger);
+            clipboardManager.removeTrigger(req.client, trigger);
         }
         res.json({ success: true });
     });
 
     app.get('/commands/allowed', (req, res) => {
-        res.render('cmd_allowed', { user: client.user, page: 'commands' });
+        res.render('cmd_allowed', { user: req.client.user, page: 'commands' });
     });
 
     // --- Allowed ID Routes ---
     app.get('/api/allowed', async (req, res) => {
         const allowedManager = require('../commands/allowedManager');
-        const data = allowedManager.loadData();
+        const data = allowedManager.loadData(req.client);
 
         // Enrich user data
         const enrichedUsers = await Promise.all(data.allowedUsers.map(async (id) => {
-            const u = await client.users.fetch(id).catch(() => null);
+            const u = await req.client.users.fetch(id).catch(() => null);
             return {
                 id,
                 username: u ? u.username : 'Unknown User',
@@ -674,9 +701,9 @@ module.exports = (client) => {
         const allowedManager = require('../commands/allowedManager');
 
         if (action === 'add') {
-            allowedManager.addAllowedUser(id);
+            allowedManager.addAllowedUser(req.client, id);
         } else if (action === 'remove') {
-            allowedManager.removeAllowedUser(id);
+            allowedManager.removeAllowedUser(req.client, id);
         }
         res.json({ success: true });
     });
@@ -684,10 +711,10 @@ module.exports = (client) => {
     // --- Mirror Routes ---
     app.get('/api/mirror', (req, res) => {
         const mirrorManager = require('../commands/mirrorManager');
-        const list = mirrorManager.getActiveMirrors() || [];
+        const list = mirrorManager.getActiveMirrors(req.client) || [];
         const enriched = list.map(m => {
-            const s = client.channels.cache.get(m.sourceId);
-            const t = client.channels.cache.get(m.targetId);
+            const s = req.client.channels.cache.get(m.sourceId);
+            const t = req.client.channels.cache.get(m.targetId);
             return {
                 ...m,
                 sourceName: s ? `#${s.name} (${s.guild?.name || 'DM'})` : m.sourceId,
@@ -703,7 +730,7 @@ module.exports = (client) => {
         const { sourceId, targetId, mode } = req.body;
         const mirrorManager = require('../commands/mirrorManager');
         try {
-            await mirrorManager.startMirror(client, sourceId, targetId, mode);
+            await mirrorManager.startMirror(req.client, client, sourceId, targetId, mode);
             res.json({ success: true });
         } catch (e) {
             res.status(400).json({ error: e.message });
@@ -713,14 +740,14 @@ module.exports = (client) => {
     app.delete('/api/mirror', async (req, res) => {
         const { sourceId } = req.body;
         const mirrorManager = require('../commands/mirrorManager');
-        await mirrorManager.stopMirror(sourceId);
+        await mirrorManager.stopMirror(req.client, sourceId);
         res.json({ success: true });
     });
 
     app.post('/api/validate/mirror-channel', async (req, res) => {
         const { id, checkWebhook } = req.body;
         try {
-            const channel = await client.channels.fetch(id).catch(() => null);
+            const channel = await req.client.channels.fetch(id).catch(() => null);
             if (!channel) return res.status(404).json({ error: 'Channel not found/Not Visible' });
 
             if (!channel.isText()) return res.status(400).json({ error: 'Not a text channel' });
@@ -728,7 +755,7 @@ module.exports = (client) => {
             // Selfbots have full user perms, just check if we can view/send
             // But channel.permissionsFor works if in guild.
             if (channel.guild) {
-                const permissions = channel.permissionsFor(client.user);
+                const permissions = channel.permissionsFor(req.client.user);
 
                 // If checking Target, ensure we can SEND
                 const { type } = req.body;
@@ -758,18 +785,18 @@ module.exports = (client) => {
     });
 
     app.get('/commands/welcomer', (req, res) => {
-        res.render('cmd_welcomer', { user: client.user, page: 'commands' });
+        res.render('cmd_welcomer', { user: req.client.user, page: 'commands' });
     });
 
     app.get('/api/welcomer', async (req, res) => {
         const welcomerManager = require('../commands/welcomerManager');
-        const data = welcomerManager.loadData();
+        const data = welcomerManager.loadData(req.client);
         const setups = data.welcomeSetups || {};
 
         // Enrich server info
         const enrichedList = [];
         for (const [guildId, val] of Object.entries(setups)) {
-            const guild = client.guilds.cache.get(guildId);
+            const guild = req.client.guilds.cache.get(guildId);
             let channelName = "Unknown Channel";
             if (guild) {
                 const c = guild.channels.cache.get(val.channelId);
@@ -800,11 +827,11 @@ module.exports = (client) => {
 
         try {
             if (action === 'add') {
-                welcomerManager.addSetup(guildId, channelId, template, background, textcolor, welcomeType, textMessage, cardMessage);
+                welcomerManager.addSetup(req.client, guildId, channelId, template, background, textcolor, welcomeType, textMessage, cardMessage);
             } else if (action === 'remove') {
-                welcomerManager.removeSetup(guildId);
+                welcomerManager.removeSetup(req.client, guildId);
             } else if (action === 'saveConfig') {
-                const data = welcomerManager.loadData();
+                const data = welcomerManager.loadData(req.client);
                 data.config = { textcolor, welcomeType, textMessage, cardMessage };
 
                 // Update all existing setups automatically
@@ -815,7 +842,7 @@ module.exports = (client) => {
                     data.welcomeSetups[gid].textMessage = textMessage;
                     data.welcomeSetups[gid].cardMessage = cardMessage;
                 }
-                welcomerManager.saveData(data);
+                welcomerManager.saveData(req.client, data);
             }
             res.json({ success: true });
         } catch (e) {
@@ -825,7 +852,7 @@ module.exports = (client) => {
 
     // --- RECORDER Routes ---
     app.get('/commands/recorder', (req, res) => {
-        res.render('cmd_recorder', { user: client.user, page: 'commands' });
+        res.render('cmd_recorder', { user: req.client.user, page: 'commands' });
     });
 
     app.get('/api/recorder/status', (req, res) => {
@@ -844,7 +871,7 @@ module.exports = (client) => {
             channelId = session.channelId;
             guildName = session.guildName;
             channelName = session.channelName;
-            const g = client.guilds.cache.get(gid);
+            const g = req.client.guilds.cache.get(gid);
             guildIcon = g ? g.iconURL({ dynamic: true }) : '';
             recordingStatus = true;
             recordingTime = Date.now() - session.recordingStartTime;
@@ -853,8 +880,8 @@ module.exports = (client) => {
 
         if (!activeGuildId) {
             // Check if connected to any VC
-            for (const [gId, guild] of client.guilds.cache.entries()) {
-                const member = guild.members.cache.get(client.user.id);
+            for (const [gId, guild] of req.client.guilds.cache.entries()) {
+                const member = guild.members.cache.get(req.client.user.id);
                 if (member && member.voice && member.voice.channelId) {
                     activeGuildId = gId;
                     channelId = member.voice.channelId;
@@ -952,7 +979,7 @@ module.exports = (client) => {
     app.get('/commands/:category', (req, res) => {
         const category = req.params.category;
         res.render('commands_sub', {
-            user: client.user,
+            user: req.client.user,
             page: 'commands',
             category: category.charAt(0).toUpperCase() + category.slice(1)
         });
@@ -961,15 +988,15 @@ module.exports = (client) => {
     // --- MUSIC Routes ---
 
     app.get('/music', (req, res) => {
-        if (!client.user) return res.send('Bot loading...');
+        if (!req.client.user) return res.send('Bot loading...');
         res.render('music', {
-            user: client.user,
+            user: req.client.user,
             page: 'music'
         });
     });
 
     app.get('/api/music/status', (req, res) => {
-        const queues = client.queueManager ? client.queueManager.getAll() : new Map();
+        const queues = req.client.queueManager ? req.client.queueManager.getAll() : new Map();
 
         const getCover = (info) => {
             if (info.sourceName === 'youtube' || info.uri.includes('youtube')) {
@@ -981,7 +1008,7 @@ module.exports = (client) => {
         };
 
         let musicData = {
-            connected: !!client.lavalink,
+            connected: !!req.client.lavalink,
             isPlaying: false,
             guildName: 'No Guild',
             guildIcon: null,
@@ -999,9 +1026,9 @@ module.exports = (client) => {
         // Get first active queue
         for (const [guildId, queue] of queues) {
             if (queue.nowPlaying) {
-                const guild = client.guilds.cache.get(guildId);
-                const voiceState = client.lavalinkVoiceStates ? client.lavalinkVoiceStates[guildId] : null; // Custom voiceStates storage
-                // OR check client.guilds.cache.get(guildId).me.voice.channel
+                const guild = req.client.guilds.cache.get(guildId);
+                const voiceState = req.client.lavalinkVoiceStates ? req.client.lavalinkVoiceStates[guildId] : null; // Custom voiceStates storage
+                // OR check req.client.guilds.cache.get(guildId).me.voice.channel
 
                 musicData.activeGuildId = guildId;
                 musicData.isPlaying = true;
@@ -1056,7 +1083,7 @@ module.exports = (client) => {
         }
 
         if (!musicData.isPlaying) {
-            for (const [id, guild] of client.guilds.cache) {
+            for (const [id, guild] of req.client.guilds.cache) {
                 if (guild.me && guild.me.voice && guild.me.voice.channelId) {
                     musicData.activeGuildId = id;
                     musicData.isConnectedToVoice = true;
@@ -1073,15 +1100,15 @@ module.exports = (client) => {
 
     app.post('/api/music/stop', async (req, res) => {
         try {
-            const queues = client.queueManager ? client.queueManager.getAll() : new Map();
+            const queues = req.client.queueManager ? req.client.queueManager.getAll() : new Map();
             let stopped = false;
 
             for (const [guildId, queue] of queues) {
                 if (queue.nowPlaying) {
-                    if (client.lavalink) {
-                        await client.lavalink.destroyPlayer(guildId);
+                    if (req.client.lavalink) {
+                        await req.client.lavalink.destroyPlayer(guildId);
                     }
-                    client.queueManager.delete(guildId);
+                    req.client.queueManager.delete(guildId);
 
                     // Try to disconnect from voice
                     const { getVoiceConnection } = require('@discordjs/voice');
@@ -1107,21 +1134,21 @@ module.exports = (client) => {
 
     app.post('/api/music/skip', async (req, res) => {
         try {
-            const queues = client.queueManager ? client.queueManager.getAll() : new Map();
+            const queues = req.client.queueManager ? req.client.queueManager.getAll() : new Map();
             for (const [guildId, queue] of queues) {
                 if (queue.nowPlaying) {
-                    if (queue.autoplay && queue.songs.length < 5) await client.queueManager.fillAutoplayQueue(client, guildId);
-                    const nextSong = client.queueManager.getNext(guildId);
+                    if (queue.autoplay && queue.songs.length < 5) await req.client.queueManager.fillAutoplayQueue(client, guildId);
+                    const nextSong = req.client.queueManager.getNext(guildId);
 
                     if (!nextSong) {
-                        if (client.lavalink) await client.lavalink.destroyPlayer(guildId);
-                        client.queueManager.delete(guildId);
+                        if (req.client.lavalink) await req.client.lavalink.destroyPlayer(guildId);
+                        req.client.queueManager.delete(guildId);
                     } else {
                         if (queue.nowPlaying) queue.history.push(queue.nowPlaying);
                         queue.nowPlaying = nextSong;
                         queue.position = 0;
                         queue.lastUpdate = Date.now();
-                        await client.lavalink.updatePlayer(guildId, nextSong, client.lavalinkVoiceStates[guildId] || {});
+                        await req.client.lavalink.updatePlayer(guildId, nextSong, req.client.lavalinkVoiceStates[guildId] || {});
                     }
                     return res.json({ success: true });
                 }
@@ -1132,7 +1159,7 @@ module.exports = (client) => {
 
     app.post('/api/music/previous', async (req, res) => {
         try {
-            const queues = client.queueManager ? client.queueManager.getAll() : new Map();
+            const queues = req.client.queueManager ? req.client.queueManager.getAll() : new Map();
             for (const [guildId, queue] of queues) {
                 if (queue.nowPlaying && queue.history.length > 0) {
                     const prev = queue.history.pop();
@@ -1140,7 +1167,7 @@ module.exports = (client) => {
                     queue.nowPlaying = prev;
                     queue.position = 0;
                     queue.lastUpdate = Date.now();
-                    await client.lavalink.updatePlayer(guildId, prev, client.lavalinkVoiceStates[guildId] || {});
+                    await req.client.lavalink.updatePlayer(guildId, prev, req.client.lavalinkVoiceStates[guildId] || {});
                     return res.json({ success: true });
                 }
             }
@@ -1151,12 +1178,12 @@ module.exports = (client) => {
     app.post('/api/music/volume', async (req, res) => {
         const { guildId, volume } = req.body;
         try {
-            const queue = client.queueManager ? client.queueManager.get(guildId) : null;
-            if (queue && client.lavalink) {
+            const queue = req.client.queueManager ? req.client.queueManager.get(guildId) : null;
+            if (queue && req.client.lavalink) {
                 const vol = parseInt(volume);
                 if (!isNaN(vol) && vol >= 0 && vol <= 500) {
                     queue.volume = vol;
-                    await client.lavalink.updatePlayerProperties(guildId, { volume: vol });
+                    await req.client.lavalink.updatePlayerProperties(guildId, { volume: vol });
                     return res.json({ success: true, volume: vol });
                 }
             }
@@ -1170,8 +1197,8 @@ module.exports = (client) => {
     app.post('/api/music/loop', async (req, res) => {
         const { guildId } = req.body;
         try {
-            const queue = client.queueManager ? client.queueManager.get(guildId) : null;
-            if (queue && client.lavalink) {
+            const queue = req.client.queueManager ? req.client.queueManager.get(guildId) : null;
+            if (queue && req.client.lavalink) {
                 if (queue.loop === 'none') queue.loop = 'track';
                 else if (queue.loop === 'track') queue.loop = 'queue';
                 else if (queue.loop === 'queue') queue.loop = 'none';
@@ -1187,11 +1214,11 @@ module.exports = (client) => {
     app.post('/api/music/autoplay', async (req, res) => {
         const { guildId } = req.body;
         try {
-            const queue = client.queueManager ? client.queueManager.get(guildId) : null;
-            if (queue && client.lavalink) {
+            const queue = req.client.queueManager ? req.client.queueManager.get(guildId) : null;
+            if (queue && req.client.lavalink) {
                 queue.autoplay = !queue.autoplay;
                 if (queue.autoplay) {
-                    await client.queueManager.fillAutoplayQueue(client, guildId);
+                    await req.client.queueManager.fillAutoplayQueue(client, guildId);
                 }
                 return res.json({ success: true, autoplay: queue.autoplay });
             }
@@ -1205,8 +1232,8 @@ module.exports = (client) => {
     app.post('/api/music/seek', async (req, res) => {
         const { guildId, amount } = req.body;
         try {
-            const queue = client.queueManager ? client.queueManager.get(guildId) : null;
-            if (queue && client.lavalink && queue.nowPlaying) {
+            const queue = req.client.queueManager ? req.client.queueManager.get(guildId) : null;
+            if (queue && req.client.lavalink && queue.nowPlaying) {
                 let newPosition = queue.position + amount;
 
                 if (newPosition < 0) newPosition = 0;
@@ -1215,7 +1242,7 @@ module.exports = (client) => {
                     if (newPosition < 0) newPosition = 0;
                 }
 
-                await client.lavalink.updatePlayerProperties(guildId, { position: newPosition });
+                await req.client.lavalink.updatePlayerProperties(guildId, { position: newPosition });
                 queue.position = newPosition;
                 queue.lastUpdate = Date.now();
                 return res.json({ success: true, position: newPosition });
@@ -1253,20 +1280,20 @@ module.exports = (client) => {
             const playlist = data[name];
             if (!playlist || playlist.length === 0) return res.json({ success: false, message: 'Playlist not found or empty' });
 
-            const voiceState = client.lavalinkVoiceStates ? client.lavalinkVoiceStates[guildId] : null;
+            const voiceState = req.client.lavalinkVoiceStates ? req.client.lavalinkVoiceStates[guildId] : null;
             if (!voiceState || !voiceState.token) {
                 return res.json({ success: false, message: 'Bot not connected to voice in this server' });
             }
 
-            let queue = client.queueManager ? client.queueManager.get(guildId) : null;
+            let queue = req.client.queueManager ? req.client.queueManager.get(guildId) : null;
             if (!queue) {
-                queue = client.queueManager.create(guildId);
+                queue = req.client.queueManager.create(guildId);
             }
 
             let added = 0;
             for (const song of playlist) {
                 try {
-                    const lRes = await client.lavalink.loadTracks(song.uri);
+                    const lRes = await req.client.lavalink.loadTracks(song.uri);
                     let trackToLoad;
 
                     if (lRes.loadType === 'track') trackToLoad = lRes.data;
@@ -1274,7 +1301,7 @@ module.exports = (client) => {
                     else if (lRes.loadType === 'search') trackToLoad = lRes.data[0];
 
                     if (trackToLoad) {
-                        client.queueManager.addSong(guildId, trackToLoad);
+                        req.client.queueManager.addSong(guildId, trackToLoad);
                         added++;
                     }
                 } catch (e) {
@@ -1282,11 +1309,11 @@ module.exports = (client) => {
                 }
             }
 
-            if (added > 0 && !queue.nowPlaying && client.queueManager) {
-                const nextSong = client.queueManager.getNext(guildId);
+            if (added > 0 && !queue.nowPlaying && req.client.queueManager) {
+                const nextSong = req.client.queueManager.getNext(guildId);
                 if (nextSong) {
                     queue.nowPlaying = nextSong;
-                    await client.lavalink.updatePlayer(guildId, nextSong, voiceState, {
+                    await req.client.lavalink.updatePlayer(guildId, nextSong, voiceState, {
                         volume: queue.volume,
                         filters: queue.filters
                     });
@@ -1294,7 +1321,7 @@ module.exports = (client) => {
             }
 
             if (queue && queue.autoplay && queue.songs.length < 5) {
-                await client.queueManager.fillAutoplayQueue(client, guildId);
+                await req.client.queueManager.fillAutoplayQueue(client, guildId);
             }
 
             res.json({ success: true, added });
@@ -1309,14 +1336,14 @@ module.exports = (client) => {
 
     app.get('/api/discord/guilds', (req, res) => {
         try {
-            const guilds = client.guilds.cache.map(g => ({ id: g.id, name: g.name, icon: g.iconURL() }));
+            const guilds = req.client.guilds.cache.map(g => ({ id: g.id, name: g.name, icon: g.iconURL() }));
             res.json(guilds);
         } catch (e) { res.json([]); }
     });
 
     app.get('/api/discord/channels/:guildId', (req, res) => {
         try {
-            const guild = client.guilds.cache.get(req.params.guildId);
+            const guild = req.client.guilds.cache.get(req.params.guildId);
             if (!guild) return res.json([]);
             const channels = guild.channels.cache
                 .filter(c => c.type === 'GUILD_VOICE' || c.type === 'GUILD_STAGE_VOICE')
@@ -1329,8 +1356,8 @@ module.exports = (client) => {
         const { guildId, channelId } = req.body;
         try {
             const payload = { op: 4, d: { guild_id: guildId, channel_id: channelId, self_mute: false, self_deaf: false } };
-            if (client.ws && client.ws.shards) client.ws.shards.get(0).send(payload);
-            else client.ws.broadcast(payload);
+            if (req.client.ws && req.client.ws.shards) req.client.ws.shards.get(0).send(payload);
+            else req.client.ws.broadcast(payload);
             res.json({ success: true });
         } catch (e) { console.error(e); res.json({ success: false }); }
     });
@@ -1338,12 +1365,12 @@ module.exports = (client) => {
     app.post('/api/music/leave', async (req, res) => {
         const { guildId } = req.body;
         try {
-            client.queueManager.delete(guildId);
-            if (client.lavalink) await client.lavalink.destroyPlayer(guildId);
+            req.client.queueManager.delete(guildId);
+            if (req.client.lavalink) await req.client.lavalink.destroyPlayer(guildId);
 
             const payload = { op: 4, d: { guild_id: guildId, channel_id: null } };
-            if (client.ws && client.ws.shards) client.ws.shards.get(0).send(payload);
-            else client.ws.broadcast(payload);
+            if (req.client.ws && req.client.ws.shards) req.client.ws.shards.get(0).send(payload);
+            else req.client.ws.broadcast(payload);
 
             res.json({ success: true });
         } catch (e) { console.error(e); res.json({ success: false }); }
@@ -1373,9 +1400,9 @@ module.exports = (client) => {
     };
 
     app.get('/server-cloner', (req, res) => {
-        if (!client.user) return res.send('Bot loading...');
+        if (!req.client.user) return res.send('Bot loading...');
         res.render('server-cloner', {
-            user: client.user,
+            user: req.client.user,
             page: 'cloner'
         });
     });
@@ -1391,10 +1418,10 @@ module.exports = (client) => {
     app.post('/api/cloner/fetch', async (req, res) => {
         const { guildId } = req.body;
         try {
-            const guild = client.guilds.cache.get(guildId);
+            const guild = req.client.guilds.cache.get(guildId);
             if (!guild) return res.json({ success: false, message: 'Guild not found (Bot must be a member)' });
 
-            const member = await guild.members.fetch(client.user.id).catch(() => null);
+            const member = await guild.members.fetch(req.client.user.id).catch(() => null);
             const isAdmin = member ? member.permissions.has('ADMINISTRATOR') : false;
 
             res.json({
@@ -1402,7 +1429,7 @@ module.exports = (client) => {
                 name: guild.name,
                 icon: guild.iconURL({ dynamic: true, size: 128 }),
                 isAdmin: isAdmin,
-                isOwner: guild.ownerId === client.user.id
+                isOwner: guild.ownerId === req.client.user.id
             });
         } catch (e) { res.json({ success: false, message: e.message }); }
     });
