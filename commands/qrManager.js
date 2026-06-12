@@ -2,21 +2,38 @@ const fs = require('fs');
 const path = require('path');
 const { fetch } = require('undici');
 
-const qrPath = path.join(__dirname, '..', 'data', 'qr.json');
+const clientSetups = new Map();
 
-const activeSetup = new Map();
+function getFile(client) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    return path.join(__dirname, '..', folder, 'qr.json');
+}
 
-function loadData() {
-    if (!fs.existsSync(qrPath)) {
+function getActiveSetupMap(client) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    if (!clientSetups.has(folder)) {
+        clientSetups.set(folder, new Map());
+    }
+    return clientSetups.get(folder);
+}
+
+function loadData(client) {
+    const file = getFile(client);
+    if (!fs.existsSync(file)) {
         return {};
     }
     try {
-        return JSON.parse(fs.readFileSync(qrPath, 'utf8'));
+        return JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch (e) { return {}; }
 }
 
-function saveData(data) {
-    fs.writeFileSync(qrPath, JSON.stringify(data, null, 2));
+function saveData(client, data) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    const dataDir = path.join(__dirname, '..', folder);
+    if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+    }
+    fs.writeFileSync(getFile(client), JSON.stringify(data, null, 2));
 }
 
 module.exports = {
@@ -27,6 +44,7 @@ module.exports = {
         const lower = content.toLowerCase();
         const userId = message.author.id;
         const now = Date.now();
+        const activeSetup = getActiveSetupMap(client);
 
         if (activeSetup.has(userId)) {
             const sess = activeSetup.get(userId);
@@ -38,7 +56,7 @@ module.exports = {
         }
 
         if (lower === 'qr' || lower === 'change qr') {
-            const db = loadData();
+            const db = loadData(client);
             if (lower === 'qr' && db[userId] && db[userId].img) {
                 await message.channel.send(db[userId].img);
                 // Send ID if exists
@@ -55,7 +73,8 @@ module.exports = {
         }
 
     
-        const session = activeSetup.get(userId);
+        const activeSetup2 = getActiveSetupMap(client);
+        const session = activeSetup2.get(userId);
         if (session) {
             if (session.step === 1) {
                 let imgUrl = null;
@@ -69,7 +88,7 @@ module.exports = {
                 if (imgUrl) {
                     session.pendingImg = imgUrl; 
                     session.step = 2;
-                    activeSetup.set(userId, session);
+                    activeSetup2.set(userId, session);
                     await message.channel.send("ok"); // Acknowledgement
                     await message.channel.send("send your id if u don't weant to set then say no");
                     return true;
@@ -80,7 +99,7 @@ module.exports = {
 
             // STEP 2: Handle ID
             if (session.step === 2) {
-                const db = loadData();
+                const db = loadData(client);
                 const input = content;
 
                 db[userId] = {
@@ -88,8 +107,8 @@ module.exports = {
                     id: (input.toLowerCase() === 'no') ? null : input
                 };
 
-                saveData(db);
-                activeSetup.delete(userId);
+                saveData(client, db);
+                activeSetup2.delete(userId);
 
                 if (db[userId].id) await message.channel.send('done');
                 else await message.channel.send('ok'); 
