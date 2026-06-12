@@ -7,6 +7,8 @@ const app = express();
 module.exports = (clients) => {
     const cookieParser = require('cookie-parser');
     app.use(cookieParser());
+    app.use(express.urlencoded({ extended: true }));
+    app.use(express.json());
 
     // Middleware to set active client
     app.use((req, res, next) => {
@@ -46,8 +48,6 @@ module.exports = (clients) => {
 
     // Static files
     app.use(express.static(path.join(__dirname, 'public')));
-    app.use(express.urlencoded({ extended: true }));
-    app.use(express.json()); // Add JSON body parser for AJAX
     const { fetch } = require('undici'); // Use undici for requests
 
     // --- LOGIN SYSTEM START ---
@@ -263,7 +263,7 @@ module.exports = (clients) => {
 
             // Trigger update via RPC Manager (which merges RPC + Status)
             const rpcManager = require('../commands/rpcManager');
-            await rpcManager.setPresence(req.client, client, rpcManager.loadData(req.client));
+            await rpcManager.setPresence(req.client, rpcManager.loadData(req.client));
 
             if (req.xhr || req.headers.accept && req.headers.accept.indexOf('json') > -1) {
                 return res.json({ success: true, message: 'Status updated!' });
@@ -414,7 +414,7 @@ module.exports = (clients) => {
         const rpcManager = require('../commands/rpcManager');
         const data = req.body;
         rpcManager.saveData(req.client, data);
-        await rpcManager.setPresence(req.client, client, data);
+        await rpcManager.setPresence(req.client, data);
         res.json({ success: true });
     });
 
@@ -618,7 +618,7 @@ module.exports = (clients) => {
                 // Validate permissions one last time logic?
                 // The frontend checks, but backend should too ideally.
                 // startTimer throws if invalid.
-                await autoMsg.startTimer(req.client, client, channelId, message, interval, unit);
+                await autoMsg.startTimer(req.client, channelId, message, interval, unit);
                 autoMsg.addAutoMsg(req.client, channelId, message, interval, unit); // Save if start success
             } else if (action === 'remove') {
                 autoMsg.removeAutoMsg(req.client, channelId);
@@ -645,7 +645,7 @@ module.exports = (clients) => {
 
         try {
             if (action === 'add') {
-                const item = timedMsg.addTimedMsg(req.client, client, channelId, message, timestamp, timezone);
+                const item = timedMsg.addTimedMsg(req.client, channelId, message, timestamp, timezone);
                 res.json({ success: true, item });
             } else if (action === 'remove') {
                 timedMsg.removeTimedMsg(req.client, id);
@@ -731,7 +731,7 @@ module.exports = (clients) => {
         const { sourceId, targetId, mode } = req.body;
         const mirrorManager = require('../commands/mirrorManager');
         try {
-            await mirrorManager.startMirror(req.client, client, sourceId, targetId, mode);
+            await mirrorManager.startMirror(req.client, sourceId, targetId, mode);
             res.json({ success: true });
         } catch (e) {
             res.status(400).json({ error: e.message });

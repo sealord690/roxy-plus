@@ -27,9 +27,10 @@ setInterval(() => {
 const dashboard = require('./dashboard/index');
 const allowedManager = require('./commands/allowedManager');
 
-function setupClient(tokenData) {
+function setupClient(tokenData, delayMs = 0) {
     const { key, token } = tokenData;
     const client = new Client({ checkUpdate: false });
+    client.token = token; // Make token string immediately accessible to dashboard
     client.dataFolder = key === 'TOKEN' ? 'data' : key.toLowerCase() + 'data';
     client.tokenKey = key;
     
@@ -477,9 +478,11 @@ function setupClient(tokenData) {
 
     global.clients.push(client);
 
-    client.login(token).catch(error => {
-        console.error(`[${key}] Failed to login:`, error.message);
-    });
+    setTimeout(() => {
+        client.login(token).catch(error => {
+            console.error(`[${key}] Failed to login:`, error.message);
+        });
+    }, delayMs);
 }
 
 process.on('unhandledRejection', (reason, promise) => {
@@ -506,8 +509,10 @@ if (tokens.length === 0) {
     process.exit(1);
 }
 
+let currentDelay = 0;
 for (const t of tokens) {
-    setupClient(t);
+    setupClient(t, currentDelay);
+    currentDelay += 5000; // 5 second stagger between logins
 }
 
 dashboard(global.clients);

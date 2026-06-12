@@ -4,9 +4,9 @@
     --bg-color: #050505;
     --card-bg: #0a0a0a;
     --text-color: #ffffff;
-    --primary-color: #b026ff;
-    --primary-glow: 0 0 20px rgba(176, 38, 255, 0.6);
-    --secondary-glow: 0 0 40px rgba(176, 38, 255, 0.3);
+    --primary-color: #a29bfe;
+    --primary-glow: 0 0 20px rgba(162, 155, 254, 0.6);
+    --secondary-glow: 0 0 40px rgba(162, 155, 254, 0.3);
 
     /* Status Colors */
     --status-online: #00ff88;
@@ -35,7 +35,7 @@ body::before {
     position: absolute;
     width: 100%;
     height: 100%;
-    background: radial-gradient(circle at 50% 50%, rgba(176, 38, 255, 0.05), transparent 70%);
+    background: radial-gradient(circle at 50% 50%, rgba(162, 155, 254, 0.05), transparent 70%);
     z-index: -1;
     position: fixed;
 }
@@ -44,7 +44,7 @@ body::before {
     background: var(--card-bg);
     padding: 3rem;
     border-radius: 20px;
-    border: 1px solid rgba(176, 38, 255, 0.2);
+    border: 1px solid rgba(162, 155, 254, 0.2);
     box-shadow: var(--primary-glow);
     text-align: center;
     width: 400px;
@@ -81,7 +81,7 @@ body::before {
         /* Inherit base dashboard styling */
         background: var(--card-bg);
         border-radius: 20px;
-        border: 1px solid rgba(176, 38, 255, 0.2);
+        border: 1px solid rgba(162, 155, 254, 0.2);
         box-shadow: var(--primary-glow);
         backdrop-filter: blur(10px);
     }
@@ -103,7 +103,7 @@ body::before {
         width: 100%;
         max-width: 400px;
         border-radius: 20px;
-        box-shadow: 0 0 30px rgba(176, 38, 255, 0.3);
+        box-shadow: 0 0 30px rgba(162, 155, 254, 0.3);
         transition: transform 0.3s ease;
     }
 
@@ -129,7 +129,7 @@ body::before {
     width: 100%;
     max-width: 300px;
     border-radius: 15px;
-    box-shadow: 0 0 20px rgba(176, 38, 255, 0.2);
+    box-shadow: 0 0 20px rgba(162, 155, 254, 0.2);
     margin-top: 2rem;
     display: block;
     /* Visible on mobile now */
@@ -147,14 +147,14 @@ body::before {
     letter-spacing: 1px;
 
     /* Gradient Text */
-    background: linear-gradient(90deg, #b026ff, #0078ff, #b026ff);
+    background: linear-gradient(90deg, #a29bfe, #0078ff, #a29bfe);
     background-size: 200% auto;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
 
     /* Glow Effect */
-    text-shadow: 0 0 30px rgba(176, 38, 255, 0.4);
+    text-shadow: 0 0 30px rgba(162, 155, 254, 0.4);
 
     animation: gradientMove 3s linear infinite, pulseGlow 3s infinite alternate;
 }
@@ -171,11 +171,11 @@ body::before {
 
 @keyframes pulseGlow {
     from {
-        text-shadow: 0 0 20px rgba(176, 38, 255, 0.4);
+        text-shadow: 0 0 20px rgba(162, 155, 254, 0.4);
     }
 
     to {
-        text-shadow: 0 0 35px rgba(176, 38, 255, 0.8);
+        text-shadow: 0 0 35px rgba(162, 155, 254, 0.8);
     }
 }
 
@@ -228,7 +228,7 @@ body::before {
 
 .uptime-badge {
     margin-top: 1rem;
-    background: rgba(176, 38, 255, 0.1);
+    background: rgba(162, 155, 254, 0.1);
     border: 1px solid var(--primary-color);
     padding: 0.8rem 1.5rem;
     border-radius: 50px;
@@ -236,7 +236,7 @@ body::before {
     font-family: 'Courier New', monospace;
     font-weight: bold;
     color: var(--primary-color);
-    box-shadow: 0 0 15px rgba(176, 38, 255, 0.2);
+    box-shadow: 0 0 15px rgba(162, 155, 254, 0.2);
 }
 
 .title {
@@ -271,7 +271,7 @@ body::before {
 .divider {
     border: 0;
     height: 1px;
-    background: rgba(176, 38, 255, 0.2);
+    background: rgba(162, 155, 254, 0.2);
     margin: 2rem 0;
 }
 
@@ -295,7 +295,7 @@ body::before {
     width: 100%;
     padding: 12px;
     background: #000;
-    border: 1px solid rgba(176, 38, 255, 0.3);
+    border: 1px solid rgba(162, 155, 254, 0.3);
     border-radius: 8px;
     color: #fff;
     font-family: inherit;
@@ -307,7 +307,7 @@ body::before {
 
 .input-field:focus {
     border-color: var(--primary-color);
-    box-shadow: 0 0 10px rgba(176, 38, 255, 0.2);
+    box-shadow: 0 0 10px rgba(162, 155, 254, 0.2);
 }
 
 .hint {
@@ -388,12 +388,12 @@ body::before {
     text-transform: uppercase;
     letter-spacing: 1px;
     transition: all 0.3s;
-    box-shadow: 0 0 20px rgba(176, 38, 255, 0.4);
+    box-shadow: 0 0 20px rgba(162, 155, 254, 0.4);
 }
 
 .save-btn:hover {
     transform: translateY(-2px);
-    box-shadow: 0 0 30px rgba(176, 38, 255, 0.6);
+    box-shadow: 0 0 30px rgba(162, 155, 254, 0.6);
 }
 
 /* --- Super Button & Menu --- */
@@ -416,7 +416,7 @@ body::before {
     color: white;
     font-size: 1.5rem;
     cursor: pointer;
-    box-shadow: 0 0 20px rgba(176, 38, 255, 0.5);
+    box-shadow: 0 0 20px rgba(162, 155, 254, 0.5);
     transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     display: flex;
     justify-content: center;
@@ -426,7 +426,7 @@ body::before {
 
 .super-btn:hover {
     transform: scale(1.1);
-    box-shadow: 0 0 30px rgba(176, 38, 255, 0.8);
+    box-shadow: 0 0 30px rgba(162, 155, 254, 0.8);
 }
 
 .super-btn.active {
@@ -441,7 +441,7 @@ body::before {
     right: 0;
     background: rgba(10, 10, 10, 0.95);
     backdrop-filter: blur(15px);
-    border: 1px solid rgba(176, 38, 255, 0.3);
+    border: 1px solid rgba(162, 155, 254, 0.3);
     border-radius: 20px;
     padding: 15px;
     width: 250px;
@@ -485,13 +485,13 @@ body::before {
 }
 
 .menu-item:hover {
-    background: rgba(176, 38, 255, 0.15);
+    background: rgba(162, 155, 254, 0.15);
     transform: translateX(-5px);
 }
 
 .menu-item.active {
-    background: rgba(176, 38, 255, 0.25);
-    border: 1px solid rgba(176, 38, 255, 0.3);
+    background: rgba(162, 155, 254, 0.25);
+    border: 1px solid rgba(162, 155, 254, 0.3);
 }
 
 .menu-item .icon {
