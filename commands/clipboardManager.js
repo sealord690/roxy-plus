@@ -1,45 +1,48 @@
 const fs = require('fs');
 const path = require('path');
 
-const dataPath = path.join(__dirname, '..', 'data', 'clipboard.json');
-
-// Ensure data directory exists
-const dataDir = path.dirname(dataPath);
-if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+function getFile(client) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    return path.join(__dirname, '..', folder, 'clipboard.json');
 }
 
-function loadData() {
-    if (!fs.existsSync(dataPath)) {
+function loadData(client) {
+    const file = getFile(client);
+    if (!fs.existsSync(file)) {
         return { triggers: {} };
     }
     try {
-        return JSON.parse(fs.readFileSync(dataPath, 'utf8'));
+        return JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch (e) {
         return { triggers: {} };
     }
 }
 
-function saveData(data) {
-    fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
+function saveData(client, data) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    const dataDir = path.join(__dirname, '..', folder);
+    if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+    }
+    fs.writeFileSync(getFile(client), JSON.stringify(data, null, 2));
 }
 
-function addTrigger(trigger, response) {
-    const data = loadData();
+function addTrigger(client, trigger, response) {
+    const data = loadData(client);
     data.triggers[trigger] = response;
-    saveData(data);
+    saveData(client, data);
 }
 
-function removeTrigger(trigger) {
-    const data = loadData();
+function removeTrigger(client, trigger) {
+    const data = loadData(client);
     if (data.triggers[trigger]) {
         delete data.triggers[trigger];
-        saveData(data);
+        saveData(client, data);
     }
 }
 
-function getResponse(trigger) {
-    const data = loadData();
+function getResponse(client, trigger) {
+    const data = loadData(client);
     return data.triggers[trigger] || null;
 }
 
