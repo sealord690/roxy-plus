@@ -5,6 +5,9 @@ const QuestManager = require('../quests/manager'); // Import QuestManager
 const app = express();
 
 module.exports = (clients) => {
+    const cookieParser = require('cookie-parser');
+    app.use(cookieParser());
+
     // Middleware to set active client
     app.use((req, res, next) => {
         if (!req.url.startsWith('/css') && !req.url.startsWith('/js') && !req.url.startsWith('/img')) {
@@ -45,8 +48,6 @@ module.exports = (clients) => {
     app.use(express.static(path.join(__dirname, 'public')));
     app.use(express.urlencoded({ extended: true }));
     app.use(express.json()); // Add JSON body parser for AJAX
-    const cookieParser = require('cookie-parser');
-    app.use(cookieParser());
     const { fetch } = require('undici'); // Use undici for requests
 
     // --- LOGIN SYSTEM START ---
