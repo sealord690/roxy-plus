@@ -14,6 +14,8 @@ const Lavalink = require('./music/lavalink');
 const Queue = require('./music/queue');
 
 global.clients = [];
+global.totalTokens = 0;
+global.loggedInTokens = 0;
 const afkCooldowns = new Map();
 
 // Cleanup old cooldowns every hour
@@ -68,8 +70,11 @@ function setupClient(tokenData, delayMs = 0) {
     }
 
     client.on('ready', () => {
-        console.log(`[${key}] Logged in as ${client.user.tag}`);
-        console.log(`[${key}] User ID: ${client.user.id}`);
+        global.loggedInTokens++;
+        const remain = global.totalTokens - global.loggedInTokens;
+
+        console.log(`[${key}] Authenticated (${global.loggedInTokens}/${global.totalTokens}) - User: ${client.user.tag} (${client.user.id}) - Remaining: ${remain}`);
+
         console.log(`[${key}] Roxy+ is ready!`);
         console.log(`[${key}] Loaded ${client.commands.size} commands`);
 
@@ -509,10 +514,14 @@ if (tokens.length === 0) {
     process.exit(1);
 }
 
+global.totalTokens = tokens.length;
+console.log(`[Boot] Multi-Token Initialization Sequence Started`);
+console.log(`[Boot] Found ${global.totalTokens} accounts in .env`);
+
 let currentDelay = 0;
 for (const t of tokens) {
     setupClient(t, currentDelay);
-    currentDelay += 5000; // 5 second stagger between logins
+    currentDelay += 10000; // 10 second stagger to completely bypass Discord IDENTIFY rate limit
 }
 
 dashboard(global.clients);
