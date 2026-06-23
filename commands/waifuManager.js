@@ -1,32 +1,19 @@
 const { fetch } = require('undici');
 
-// Endpoints
-const WAIFU_SFW = ['waifu', 'neko', 'hug', 'kiss', 'pat', 'slap', 'kill'];
-const WAIFU_NSFW = ['waifu', 'neko', 'blowjob'];
-const NEKO_NSFW = ['hentai', 'anal', 'boobs'];
-
-// Mapping commands to API endpoints keys if different
 const ENDPOINT_MAP = {
     'anal': 'hanal',
     'boobs': 'hboobs'
-    // 'hentai' is 'hentai'
 };
 
 module.exports = {
     initialize(client) {
         const commands = [
-            // SFW/NSFW Toggleable
             { name: 'waifu', type: 'mixed' },
             { name: 'neko', type: 'mixed' },
-
-            // Interactions
             { name: 'hug', type: 'sfw' },
             { name: 'kiss', type: 'sfw' },
             { name: 'pat', type: 'sfw' },
             { name: 'slap', type: 'sfw' },
-            { name: 'kill', type: 'sfw' },
-
-            // NSFW Only
             { name: 'blowjob', type: 'nsfw', source: 'waifu' },
             { name: 'hentai', type: 'nsfw', source: 'neko' },
             { name: 'anal', type: 'nsfw', source: 'neko' },
@@ -46,35 +33,38 @@ module.exports = {
     },
 
     async handleCommand(message, name, config) {
-        const isNsfw = message.channel.type === 'GUILD_TEXT' ? message.channel.nsfw : true; // DMs are usually considered NSFW enabled or free
-
+        const isNsfw = message.channel.type === 'GUILD_TEXT' ? message.channel.nsfw : true;
         let url = '';
 
         try {
             if (config.type === 'nsfw') {
-                if (!isNsfw) return; // Silent fail if SFW channel
+                if (!isNsfw) return;
 
                 if (config.source === 'waifu') {
-                    url = await this.getWaifuPics('nsfw', name);
+                    url = await this.getNekoBot('pgif');
                 } else {
                     const endpoint = ENDPOINT_MAP[name] || name;
                     url = await this.getNekoBot(endpoint);
                 }
             } else if (config.type === 'mixed') {
-                const type = isNsfw ? 'nsfw' : 'sfw';
-                url = await this.getWaifuPics(type, name);
+                if (isNsfw) {
+                    if (name === 'waifu') {
+                        url = await this.getNekoBot('hentai');
+                    } else {
+                        url = await this.getNekoBot('neko');
+                    }
+                } else {
+                    url = await this.getNekosLife(name);
+                }
             } else {
-                // sfw / interactions
-                url = await this.getWaifuPics('sfw', name);
+                url = await this.getNekosLife(name);
             }
 
             if (!url) return;
 
-            // Reply Logic
             const referenceId = message.reference ? message.reference.messageId : null;
 
             if (referenceId) {
-                // Reply to the referenced message
                 try {
                     const repliedMsg = await message.channel.messages.fetch(referenceId);
                     if (repliedMsg) {
@@ -86,7 +76,6 @@ module.exports = {
                     await message.channel.send(url);
                 }
             } else {
-                // Just send to channel
                 await message.channel.send(url);
             }
 
@@ -95,9 +84,9 @@ module.exports = {
         }
     },
 
-    async getWaifuPics(type, category) {
+    async getNekosLife(category) {
         try {
-            const res = await fetch(`https://api.waifu.pics/${type}/${category}`);
+            const res = await fetch(`https://nekos.life/api/v2/img/${category}`);
             const data = await res.json();
             return data.url;
         } catch (e) { return null; }
