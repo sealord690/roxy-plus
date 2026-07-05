@@ -2,24 +2,40 @@ const { WebhookClient } = require('discord.js-selfbot-v13');
 const fs = require('fs');
 const path = require('path');
 
-const CONFIG_PATH = path.join(__dirname, '../data/mirror_config.json');
+const clientMirrors = new Map();
 
-let activeMirrors = new Map();
+function getFile(client) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    return path.join(__dirname, '..', folder, 'mirror_config.json');
+}
 
-function loadData() {
-    if (!fs.existsSync(CONFIG_PATH)) {
-        fs.writeFileSync(CONFIG_PATH, JSON.stringify({}, null, 4));
+function getActiveMirrorsMap(client) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    if (!clientMirrors.has(folder)) {
+        clientMirrors.set(folder, new Map());
+    }
+    return clientMirrors.get(folder);
+}
+
+function loadData(client) {
+    const file = getFile(client);
+    if (!fs.existsSync(file)) {
+        const folder = client && client.dataFolder ? client.dataFolder : 'data';
+        const dataDir = path.join(__dirname, '..', folder);
+        if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+        fs.writeFileSync(file, JSON.stringify({}, null, 4));
         return {};
     }
     try {
-        return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+        return JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch (e) {
         return {};
     }
 }
 
-function saveData() {
+function saveData(client) {
     const data = {};
+    const activeMirrors = getActiveMirrorsMap(client);
     for (const [sourceId, config] of activeMirrors.entries()) {
         data[sourceId] = {
             sourceId: config.sourceId,
@@ -29,12 +45,16 @@ function saveData() {
             startTime: config.startTime
         };
     }
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 4));
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    const dataDir = path.join(__dirname, '..', folder);
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(getFile(client), JSON.stringify(data, null, 4));
 }
 
 async function initialize(client) {
-    console.log("[Mirror System] Initializing...");
-    const saved = loadData();
+    console.log("[Mirror System] Initializing for", client.user?.tag || "Unknown");
+    const saved = loadData(client);
+    const activeMirrors = getActiveMirrorsMap(client);
 
     for (const [sourceId, config] of Object.entries(saved)) {
         try {
@@ -45,6 +65,7 @@ async function initialize(client) {
     }
 
     client.on('messageCreate', async (message) => {
+        const activeMirrors = getActiveMirrorsMap(client);
         if (!activeMirrors.has(message.channel.id)) return;
         const config = activeMirrors.get(message.channel.id);
 
@@ -63,6 +84,7 @@ async function initialize(client) {
 }
 
 async function startMirror(client, sourceId, targetId, mode, webhookData = null, isRestoring = false) {
+    const activeMirrors = getActiveMirrorsMap(client);
     if (activeMirrors.has(sourceId)) {
         throw new Error("Mirror already active for this source channel.");
     }
@@ -109,14 +131,15 @@ async function startMirror(client, sourceId, targetId, mode, webhookData = null,
     activeMirrors.set(sourceId, config);
 
     if (!isRestoring) {
-        saveData();
+        saveData(client);
     }
 }
 
-async function stopMirror(sourceId) {
+async function stopMirror(client, sourceId) {
+    const activeMirrors = getActiveMirrorsMap(client);
     if (!activeMirrors.has(sourceId)) return false;
     activeMirrors.delete(sourceId);
-    saveData();
+    saveData(client);
     return true;
 }
 
@@ -180,8 +203,9 @@ async function processMirror(client, message, config) {
     }
 }
 
-function getActiveMirrors() {
+function getActiveMirrors(client) {
     const list = [];
+    const activeMirrors = getActiveMirrorsMap(client);
     for (const [sourceId, config] of activeMirrors.entries()) {
         list.push({
             sourceId,

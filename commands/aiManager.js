@@ -3,8 +3,13 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-const CONFIG_PATH = path.join(__dirname, '../data/ai_config.json');
-const HISTORY_PATH = path.join(__dirname, '../data/chat_history.json');
+function getPaths(client) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    return {
+        CONFIG_PATH: path.join(__dirname, '..', folder, 'ai_config.json'),
+        HISTORY_PATH: path.join(__dirname, '..', folder, 'chat_history.json')
+    };
+}
 
 // Initialize API
 const openai = new OpenAI({
@@ -31,8 +36,9 @@ const DEFAULT_CONFIG = {
     blockedUsers: []
 };
 
-function loadData() {
+function loadData(client) {
     try {
+        const { CONFIG_PATH } = getPaths(client);
         if (!fs.existsSync(CONFIG_PATH)) {
             const dir = path.dirname(CONFIG_PATH);
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -53,12 +59,13 @@ function loadData() {
     }
 }
 
-function saveData(data) {
+function saveData(client, data) {
     try {
+        const { CONFIG_PATH } = getPaths(client);
         const dir = path.dirname(CONFIG_PATH);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         // Merge with existing to preserve unseen keys
-        const existing = loadData();
+        const existing = loadData(client);
         const finalData = { ...existing, ...data };
         fs.writeFileSync(CONFIG_PATH, JSON.stringify(finalData, null, 4));
     } catch (e) {
@@ -66,7 +73,8 @@ function saveData(data) {
     }
 }
 
-function loadHistory() {
+function loadHistory(client) {
+    const { HISTORY_PATH } = getPaths(client);
     if (!fs.existsSync(HISTORY_PATH)) {
         fs.writeFileSync(HISTORY_PATH, JSON.stringify({}, null, 4));
         return {};
@@ -74,12 +82,13 @@ function loadHistory() {
     return JSON.parse(fs.readFileSync(HISTORY_PATH, 'utf8'));
 }
 
-function saveHistory(history) {
+function saveHistory(client, history) {
+    const { HISTORY_PATH } = getPaths(client);
     fs.writeFileSync(HISTORY_PATH, JSON.stringify(history, null, 4));
 }
 
-function getContext(userId, config) {
-    const history = loadHistory();
+function getContext(client, userId, config) {
+    const history = loadHistory(client);
     const userHistory = history[userId] || [];
 
     // System Prompt
@@ -92,8 +101,8 @@ function getContext(userId, config) {
     return messages;
 }
 
-async function addHistory(userId, userContent, aiContent) {
-    let history = loadHistory();
+async function addHistory(client, userId, userContent, aiContent) {
+    let history = loadHistory(client);
     if (!history[userId]) history[userId] = [];
 
     history[userId].push({ role: "user", content: userContent });
@@ -104,50 +113,90 @@ async function addHistory(userId, userContent, aiContent) {
         history[userId] = history[userId].slice(history[userId].length - 10);
     }
 
-    saveHistory(history);
+    saveHistory(client, history);
 }
 
 // Core Chat Function
-async function generateReply(userId, userContent) {
-    const config = loadData();
-    const messages = getContext(userId, config);
+async function generateReply(client, userId, userContent) {
+    const config = loadData(client);
+    const messages = getContext(client, userId, config);
 
     // Append current message
     messages.push({ role: "user", content: userContent });
 
-    // Determine Model Parameters
-    let modelName = "moonshotai/kimi-k2-thinking";
-    let temp = 1;
+    let modelName = "moonshotai/kimi-k2.6";
+    let temp = 1.00;
     let maxTokens = 16384;
+    let topP = 1.00;
+    let extraParams = {
+        chat_template_kwargs: { thinking: true }
+    };
 
     if (config.modelType === "fast") {
-        modelName = "moonshotai/kimi-k2-instruct-0905";
-        temp = 0.6;
-        maxTokens = 4096;
+        modelName = "qwen/qwen3.5-397b-a17b";
+        temp = 0.70;
+        topP = 0.80;
+        extraParams = {
+            top_k: 20,
+            presence_penalty: 0,
+            repetition_penalty: 1,
+            chat_template_kwargs: { enable_thinking: false }
+        };
     }
 
     try {
-        const completion = await openai.chat.completions.create({
-            model: modelName,
-            messages: messages,
-            temperature: temp,
-            top_p: 0.9,
-            max_tokens: maxTokens,
-            stream: true
+        const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.AI_API}`,
+                'Accept': 'text/event-stream',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: modelName,
+                messages: messages,
+                temperature: temp,
+                top_p: topP,
+                max_tokens: maxTokens,
+                stream: true,
+                ...extraParams
+            })
         });
 
-        let fullContent = "";
-        let fullReasoning = "";
+        if (!response.ok) {
+            console.error(`[AI] HTTP Error: ${response.status} ${await response.text()}`);
+            return "what you mean?";
+        }
 
-        for await (const chunk of completion) {
-            const delta = chunk.choices[0]?.delta;
-            if (delta?.reasoning_content) {
-                fullReasoning += delta.reasoning_content;
-                // process.stdout.write(delta.reasoning_content); // Hidden
-            }
-            if (delta?.content) {
-                fullContent += delta.content;
-                // process.stdout.write(delta.content); // Hidden
+        let fullContent = "";
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            let newlineIndex;
+            while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+                const line = buffer.slice(0, newlineIndex).trim();
+                buffer = buffer.slice(newlineIndex + 1);
+
+                if (line.startsWith('data: ')) {
+                    const dataStr = line.slice(6).trim();
+                    if (dataStr === '[DONE]') continue;
+                    try {
+                        const data = JSON.parse(dataStr);
+                        const delta = data.choices?.[0]?.delta;
+                        if (delta?.content) {
+                            fullContent += delta.content;
+                        }
+                    } catch (e) {
+                    }
+                } else if (line.startsWith('event: error')) {
+                    console.error("[AI] Nvidia Stream Error Event Received.");
+                }
             }
         }
 
@@ -158,10 +207,11 @@ async function generateReply(userId, userContent) {
 
         // Save to history
         if (fullContent.trim()) {
-            await addHistory(userId, userContent, fullContent);
+            await addHistory(client, userId, userContent, fullContent);
+            return fullContent;
         }
 
-        return fullContent;
+        return "what you mean?";
 
     } catch (error) {
         console.error("[AI] Error generating reply:", error);
@@ -185,7 +235,7 @@ function initialize(client) {
             const ignoredTypes = ['RECIPIENT_ADD', 'RECIPIENT_REMOVE', 'CALL', 'CHANNEL_NAME_CHANGE', 'CHANNEL_ICON_CHANGE', 'PINS_ADD'];
             if (ignoredTypes.includes(message.type)) return;
 
-            const config = loadData();
+            const config = loadData(client);
             const content = message.content;
             const guildId = message.guild?.id;
             const channelId = message.channel.id;
@@ -234,7 +284,7 @@ function initialize(client) {
                         freeWillDelay = typeof fwItem === 'object' ? (fwItem.delay || 0) : 0;
                     }
                 }
-                
+
                 // Check Mention/Reply triggers
                 if (!isFreeWill) {
                     const isMentioned = message.mentions.users.has(client.user.id);
@@ -265,7 +315,7 @@ function initialize(client) {
                     // Generate
                     // Prepend username for context
                     const effectiveContent = `(User: ${message.author.username}) ${content}`;
-                    const reply = await generateReply(authorId, effectiveContent);
+                    const reply = await generateReply(client, authorId, effectiveContent);
 
                     if (freeWillDelay > 0) {
                         const timeTaken = Date.now() - startTime;
@@ -277,9 +327,9 @@ function initialize(client) {
 
                     if (reply && reply.trim().length > 0) {
                         try {
-                            await message.reply({ 
-                                content: reply, 
-                                allowedMentions: { repliedUser: !config.disablePing } 
+                            await message.reply({
+                                content: reply,
+                                allowedMentions: { repliedUser: !config.disablePing }
                             });
                         } catch (e) {
                             // Fallback: If reply fails (e.g. Invalid Form Body), try normal send
@@ -293,11 +343,11 @@ function initialize(client) {
                 if (isFreeWill && freeWillDelay > 0) {
                     if (!client.freeWillQueues) client.freeWillQueues = new Map();
                     const currentQueue = client.freeWillQueues.get(channelId) || Promise.resolve();
-                    
+
                     const nextQueue = currentQueue
                         .then(() => processReply())
                         .catch(err => console.error("[AI Queue Error]:", err));
-                        
+
                     client.freeWillQueues.set(channelId, nextQueue);
                 } else {
                     // Normal execution for mentions, whitelisted channels, etc.

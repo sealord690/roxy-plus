@@ -2,8 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const statusManager = require('./statusManager');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const RPC_FILE = path.join(DATA_DIR, 'rpc.json');
+function getRpcFile(client) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    return path.join(__dirname, '..', folder, 'rpc.json');
+}
 
 const defaultData = {
     enabled: false,
@@ -28,24 +30,30 @@ const defaultData = {
     selectedGame: 'none'
 };
 
-function loadData() {
-    if (!fs.existsSync(RPC_FILE)) return defaultData;
+function loadData(client) {
+    const file = getRpcFile(client);
+    if (!fs.existsSync(file)) return defaultData;
     try {
-        const loaded = JSON.parse(fs.readFileSync(RPC_FILE, 'utf8'));
+        const loaded = JSON.parse(fs.readFileSync(file, 'utf8'));
         return { ...defaultData, ...loaded };
     } catch (e) { return defaultData; }
 }
 
-function saveData(data) {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+function saveData(client, data) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    const dataDir = path.join(__dirname, '..', folder);
+    const file = getRpcFile(client);
+
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
     const startOffset = parseInt(data.startTimestamp);
     const endOffset = parseInt(data.endTimestamp);
 
     if (data.gameSpoofing) {
-        const oldData = fs.existsSync(RPC_FILE) ? JSON.parse(fs.readFileSync(RPC_FILE, 'utf8')) : {};
+        const oldData = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
         if (!oldData.gameSpoofing || oldData.selectedGame !== data.selectedGame || !oldData.epochGameTimestamp) {
             data.epochGameTimestamp = Date.now();
+
         } else {
             data.epochGameTimestamp = oldData.epochGameTimestamp;
         }
@@ -64,7 +72,7 @@ function saveData(data) {
         }
     }
 
-    fs.writeFileSync(RPC_FILE, JSON.stringify(data, null, 2));
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
 async function setPresence(client, data) {
@@ -157,7 +165,7 @@ async function setPresence(client, data) {
         }
 
         // 2. Custom Status Activity
-        const statusData = statusManager.loadData();
+        const statusData = statusManager.loadData(client);
         const statusActivity = statusManager.getStatusActivity(statusData);
         if (statusActivity) {
             activities.push(statusActivity);
@@ -179,7 +187,7 @@ module.exports = {
     saveData,
     setPresence,
     initialize: async (client) => {
-        const data = loadData();
+        const data = loadData(client);
         await setPresence(client, data);
     }
 };

@@ -1,8 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const STATUS_FILE = path.join(DATA_DIR, 'status.json');
+function getStatusFile(client) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    return path.join(__dirname, '..', folder, 'status.json');
+}
 
 const defaultData = {
     status: 'online',
@@ -10,20 +12,25 @@ const defaultData = {
     emoji: ''
 };
 
-function loadData() {
-    if (!fs.existsSync(STATUS_FILE)) return defaultData;
+function loadData(client) {
+    const file = getStatusFile(client);
+    if (!fs.existsSync(file)) return defaultData;
     try {
-        const loaded = JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8'));
+        const loaded = JSON.parse(fs.readFileSync(file, 'utf8'));
         return { ...defaultData, ...loaded };
     } catch (e) { return defaultData; }
 }
 
-function saveData(data) {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+function saveData(client, data) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    const dataDir = path.join(__dirname, '..', folder);
+    const file = getStatusFile(client);
+
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
     // Merge with existing to avoid overwriting missing keys if any
-    const existing = loadData();
+    const existing = loadData(client);
     const newData = { ...existing, ...data };
-    fs.writeFileSync(STATUS_FILE, JSON.stringify(newData, null, 2));
+    fs.writeFileSync(file, JSON.stringify(newData, null, 2));
 }
 
 function parseEmoji(text) {

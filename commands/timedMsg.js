@@ -2,27 +2,40 @@ const fs = require('fs');
 const path = require('path');
 const cron = require('node-cron');
 
-const CONFIG_PATH = path.join(__dirname, '../data/timed_msg.json');
+let clientJobs = new Map();
 
-let activeJobs = new Map();
+function getFile(client) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    return path.join(__dirname, '..', folder, 'timed_msg.json');
+}
 
-function loadData() {
-    if (!fs.existsSync(CONFIG_PATH)) {
-        const dir = path.dirname(CONFIG_PATH);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+function getActiveJobsMap(client) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    if (!clientJobs.has(folder)) {
+        clientJobs.set(folder, new Map());
+    }
+    return clientJobs.get(folder);
+}
 
-        fs.writeFileSync(CONFIG_PATH, JSON.stringify([], null, 4));
+function loadData(client) {
+    const file = getFile(client);
+    if (!fs.existsSync(file)) {
+        const folder = client && client.dataFolder ? client.dataFolder : 'data';
+        const dataDir = path.join(__dirname, '..', folder);
+        if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+        fs.writeFileSync(file, JSON.stringify([], null, 4));
         return [];
     }
     try {
-        return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+        return JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch (e) {
         return [];
     }
 }
 
-function saveData(data) {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 4));
+function saveData(client, data) {
+    fs.writeFileSync(getFile(client), JSON.stringify(data, null, 4));
 }
 
 async function executeMessage(client, item) {
@@ -47,7 +60,7 @@ async function executeMessage(client, item) {
             console.warn(`[Timed Msg] FAILED: Target ${item.channelId} not found.`);
         }
 
-        removeTimedMsg(jobId);
+        removeTimedMsg(client, jobId);
 
     } catch (e) {
         console.error(`[Timed Msg] Error executing ${jobId}:`, e.message);
@@ -55,8 +68,8 @@ async function executeMessage(client, item) {
 }
 
 async function initialize(client) {
-    console.log("[Timed Msg] Initializing...");
-    const saved = loadData();
+    console.log("[Timed Msg] Initializing for", client.user?.tag || "Unknown");
+    const saved = loadData(client);
     const now = Date.now();
     let count = 0;
 
@@ -79,6 +92,7 @@ async function initialize(client) {
 }
 
 function scheduleMessage(client, item) {
+    const activeJobs = getActiveJobsMap(client);
     const jobId = item.id;
     if (activeJobs.has(jobId)) {
         activeJobs.get(jobId).stop();
@@ -96,6 +110,7 @@ function scheduleMessage(client, item) {
 
     try {
         const task = cron.schedule(cronPattern, () => executeMessage(client, item));
+        const activeJobs = getActiveJobsMap(client);
         activeJobs.set(jobId, task);
     } catch (e) {
         console.error(`[Timed Msg] Failed to schedule ${jobId}:`, e.message);
@@ -103,7 +118,7 @@ function scheduleMessage(client, item) {
 }
 
 function addTimedMsg(client, channelId, message, timestamp, timezone) {
-    const list = loadData();
+    const list = loadData(client);
     const id = Date.now().toString(36) + Math.random().toString(36).substr(2);
 
     const newItem = {
@@ -115,26 +130,27 @@ function addTimedMsg(client, channelId, message, timestamp, timezone) {
     };
 
     list.push(newItem);
-    saveData(list);
+    saveData(client, list);
 
     // Schedule
     scheduleMessage(client, newItem);
     return newItem;
 }
 
-function removeTimedMsg(id) {
-    const list = loadData();
+function removeTimedMsg(client, id) {
+    const list = loadData(client);
     const newList = list.filter(x => x.id !== id);
-    saveData(newList);
+    saveData(client, newList);
 
+    const activeJobs = getActiveJobsMap(client);
     if (activeJobs.has(id)) {
         activeJobs.get(id).stop();
         activeJobs.delete(id);
     }
 }
 
-function getList() {
-    return loadData();
+function getList(client) {
+    return loadData(client);
 }
 
 module.exports = { initialize, addTimedMsg, removeTimedMsg, getList };

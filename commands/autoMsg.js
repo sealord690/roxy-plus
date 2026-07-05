@@ -1,10 +1,20 @@
 const fs = require('fs');
 const path = require('path');
 
-const CONFIG_PATH = path.join(__dirname, '../data/auto_msg.json');
+let clientTimers = new Map();
 
-// Store active intervals: Map<channelId, IntervalID>
-let activeTimers = new Map();
+function getFile(client) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    return path.join(__dirname, '..', folder, 'auto_msg.json');
+}
+
+function getActiveTimersMap(client) {
+    const folder = client && client.dataFolder ? client.dataFolder : 'data';
+    if (!clientTimers.has(folder)) {
+        clientTimers.set(folder, new Map());
+    }
+    return clientTimers.get(folder);
+}
 
 // Helper to calculate milliseconds
 function getMilliseconds(val, unit) {
@@ -19,25 +29,29 @@ function getMilliseconds(val, unit) {
     }
 }
 
-function loadData() {
-    if (!fs.existsSync(CONFIG_PATH)) {
-        fs.writeFileSync(CONFIG_PATH, JSON.stringify([], null, 4));
+function loadData(client) {
+    const file = getFile(client);
+    if (!fs.existsSync(file)) {
+        const folder = client && client.dataFolder ? client.dataFolder : 'data';
+        const dataDir = path.join(__dirname, '..', folder);
+        if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+        fs.writeFileSync(file, JSON.stringify([], null, 4));
         return [];
     }
     try {
-        return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+        return JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch (e) {
         return [];
     }
 }
 
-function saveData(data) {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 4));
+function saveData(client, data) {
+    fs.writeFileSync(getFile(client), JSON.stringify(data, null, 4));
 }
 
 async function initialize(client) {
-    console.log("[Auto Msg] Initializing...");
-    const saved = loadData();
+    console.log("[Auto Msg] Initializing for", client.user?.tag || "Unknown");
+    const saved = loadData(client);
 
     let count = 0;
     for (const item of saved) {
@@ -53,7 +67,7 @@ async function initialize(client) {
 
 async function startTimer(client, channelId, messageContent, intervalVal, unit) {
     // Clear existing timer for this channel/user if any
-    stopTimer(channelId);
+    stopTimer(client, channelId);
 
     const ms = getMilliseconds(intervalVal, unit);
     if (!ms || ms < 1000) throw new Error("Invalid interval (Min 1 second)");
@@ -96,11 +110,13 @@ async function startTimer(client, channelId, messageContent, intervalVal, unit) 
         }
     }, ms);
 
+    const activeTimers = getActiveTimersMap(client);
     activeTimers.set(channelId, timer);
     return true;
 }
 
-function stopTimer(channelId) {
+function stopTimer(client, channelId) {
+    const activeTimers = getActiveTimersMap(client);
     if (activeTimers.has(channelId)) {
         clearInterval(activeTimers.get(channelId));
         activeTimers.delete(channelId);
@@ -108,8 +124,8 @@ function stopTimer(channelId) {
 }
 
 // API Methods
-function addAutoMsg(channelId, message, interval, unit) {
-    const list = loadData();
+function addAutoMsg(client, channelId, message, interval, unit) {
+    const list = loadData(client);
     // Check duplication? Allow update.
     const index = list.findIndex(x => x.channelId === channelId);
 
@@ -119,18 +135,18 @@ function addAutoMsg(channelId, message, interval, unit) {
         list.push({ channelId, message, interval, unit });
     }
 
-    saveData(list);
+    saveData(client, list);
 }
 
-function removeAutoMsg(channelId) {
-    const list = loadData();
+function removeAutoMsg(client, channelId) {
+    const list = loadData(client);
     const newList = list.filter(x => x.channelId !== channelId);
-    saveData(newList);
-    stopTimer(channelId);
+    saveData(client, newList);
+    stopTimer(client, channelId);
 }
 
-function getList() {
-    return loadData();
+function getList(client) {
+    return loadData(client);
 }
 
 module.exports = { initialize, startTimer, stopTimer, addAutoMsg, removeAutoMsg, getList };
